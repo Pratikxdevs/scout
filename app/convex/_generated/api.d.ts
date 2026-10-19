@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as actions_devprobe from "../actions/devprobe.js";
 import type * as actions_discovery from "../actions/discovery.js";
 import type * as actions_fetchPages from "../actions/fetchPages.js";
 import type * as actions_generateOutreachDraft from "../actions/generateOutreachDraft.js";
@@ -46,6 +47,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  "actions/devprobe": typeof actions_devprobe;
   "actions/discovery": typeof actions_discovery;
   "actions/fetchPages": typeof actions_fetchPages;
   "actions/generateOutreachDraft": typeof actions_generateOutreachDraft;
