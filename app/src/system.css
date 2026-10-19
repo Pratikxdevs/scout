@@ -207,6 +207,12 @@ input[type="checkbox"], input[type="radio"] { width: auto; }
 .wiz-step[data-state="now"] .wiz-name { color: var(--ink); font-weight: 600; }
 .wiz-bar { position: absolute; top: 17px; left: calc(50% + 24px); right: calc(-50% + 24px); height: 2px; background: var(--border); }
 .wiz-bar > span { display: block; height: 100%; background: var(--primary); border-radius: 2px; transition: width .25s; }
+/* the step's one authored moment: content eases in when advancing; everything
+   else on the page stays still. Interruptible-friendly (backwards fill, small
+   offset, exponential-style ease-out per system motion language). */
+@keyframes wiz-step-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.wiz-step-in { animation: wiz-step-in .28s cubic-bezier(.2, 0, 0, 1) backwards; }
+@media (prefers-reduced-motion: reduce) { .wiz-step-in { animation: none; } }
 .wiz-grid { display: grid; gap: 18px; grid-template-columns: 1fr; align-items: start; }
 @media (min-width: 960px) { .wiz-grid { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); } }
 .ava-edit { position: relative; display: inline-block; }

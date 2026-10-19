@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   ArrowRightIcon, BriefcaseIcon, CheckIcon, EnvelopeIcon, MagnifyingGlassIcon, MapPinIcon, UserIcon,
 } from '@heroicons/react/24/outline';
-import { DEFAULT_PROFILE, useStore } from '../../store';
+import { useStore } from '../../store';
 import { COUNTRIES } from '../../lib/countries';
 import { initialsFor } from '../../lib/profileSync';
 import { isValidEmail } from '../../lib/validate';
@@ -13,24 +13,31 @@ import { ChipInput, EditableAvatar, stagger } from '../../components/ui';
  * profile drives query planning (backend SPEC §4) and lead scoring
  * (SPEC §8). No resume, no enrichment — every field is typed directly and
  * everything stays editable in Settings. A live preview mirrors each step
- * so the ICP being built is never抽象. */
+ * so the ICP being built is never abstract. */
 
 const WIZ_STEPS = ['You', 'Services', 'Targeting'];
 const WIZ_WORK = ['Remote', 'Hybrid', 'On-site'];
 /** Per-engagement deal sizes the user targets (USD, client-side presets). */
 const WIZ_BUDGET = [500, 1000, 2500, 5000, 10000, 25000, 50000, 100000];
-const fmtMoney = (n: number) => `\$${n >= 1000 ? `\${(n / 1000).toString().replace(/\\.0$/, '')}k` : n}`;
+const fmtMoney = (n: number): string => (n >= 1000 ? '$' + (n / 1000).toString().replace(/\.0$/, '') + 'k' : '$' + n);
 
-const STEP_HEAD: readonly { title: string; sub: string }[] = [
+const STEP_HEAD = [
   { title: 'Your basics', sub: 'Who you are and where you work — used to prefill outreach drafts.' },
-  { title: 'What you sell', sub: 'Services and tools; these seed the hunt\u2019s query planning.' },
+  { title: 'What you sell', sub: 'Services and tools; these seed the hunt query planning.' },
   { title: 'Who you target', sub: 'Client types, search phrases and the deal sizes worth hunting.' },
-];
+] as const;
 
 const STEP_ICON = [UserIcon, BriefcaseIcon, MagnifyingGlassIcon];
 
 function withCurrent(list: string[], cur: string) {
   return cur && !list.includes(cur) ? [cur, ...list] : list;
+}
+
+function budgetLabel(lo: number | null, hi: number | null): string {
+  if (lo !== null && hi !== null) return fmtMoney(lo) + '–' + fmtMoney(hi) + ' per project';
+  if (lo !== null) return fmtMoney(lo) + '+ per project';
+  if (hi !== null) return 'Up to ' + fmtMoney(hi) + ' per project';
+  return 'Budgets open — any deal size counts';
 }
 
 export function Onboarding() {
@@ -85,10 +92,6 @@ export function Onboarding() {
       ? [d.services.length === 0 && 'at least one service'].filter(Boolean)
       : [d.industries.length === 0 && 'at least one target industry', !minOk && 'a valid budget range'].filter(Boolean);
   const canAdvance = missing.length === 0;
-  const cur = (d.minBudget ?? 0) + (d.maxBudget ?? 0) === 0;
-  const budgetLine = d.minBudget !== null && d.maxBudget !== null
-    ? `\${fmtMoney(d.minBudget)}–\${fmtMoney(d.maxBudget)} per project`
-    : 'Budgets open — any deal size counts';
 
   const pickAvatar = async (file: File) => {
     setAvatarBusy(true);
@@ -100,7 +103,7 @@ export function Onboarding() {
       <header style={{ display: 'grid', gap: 6, justifyItems: 'start' }}>
         <h1 className="t-display" style={{ margin: 0 }}>Build your ICP</h1>
         <p className="muted t-small" style={{ margin: 0 }}>
-          This is Scout\u2019s operating brief — how hunts get planned and how every lead gets scored. Everything stays editable in Settings.
+          Scout's operating brief — how hunts get planned and how every lead gets scored. Everything stays editable in Settings.
         </p>
       </header>
 
@@ -135,7 +138,7 @@ export function Onboarding() {
             </p>
           </div>
           <div>
-            <h3 className="t-h3">Clients you\u2019re hunting</h3>
+            <h3 className="t-h3">Clients you're hunting</h3>
             <div className="row" style={{ flexWrap: 'wrap', marginTop: 8 }}>
               {d.industries.length > 0
                 ? d.industries.map(s => <span key={s} className="prev-pill">{s}</span>)
@@ -155,10 +158,10 @@ export function Onboarding() {
                 : <span className="muted t-caption">No skills yet — add them in step 2.</span>}
             </div>
           </div>
-          <p className="muted t-caption" style={{ borderTop: '1px solid var(--border)', paddingTop: 14, margin: 0 }} data-testid="wiz-preview-foot">
+          <p className="muted t-caption" style={{ borderTop: '1px solid var(--border)', paddingTop: 14, margin: 0 }}>
             {[d.city, d.country].filter(Boolean).join(', ') || 'Set your location in step 1'}
             {' · '}{d.workType}
-            {' · '}{cur ? budgetLine : d.minBudget !== null || d.maxBudget !== null ? (cur ? 'Budgets open — any deal size counts' : budgetLine) : budgetLine}
+            {' · '}{budgetLabel(d.minBudget, d.maxBudget)}
           </p>
         </div></section>
 
@@ -174,7 +177,7 @@ export function Onboarding() {
             <p className="muted t-small" style={{ margin: 0 }}>{STEP_HEAD[n].sub}</p>
           </div>
 
-          <div key={\`body-\${n}\`} className="wiz-step-in" style={{ display: 'grid', gap: 14, alignContent: 'start' }}>
+          <div key={'body-' + n} className="wiz-step-in" style={{ display: 'grid', gap: 14, alignContent: 'start' }}>
             {n === 0 ? (<>
               <div className="row" style={{ gap: 12 }}>
                 <span style={{ flex: '1 1 auto', minWidth: 0, display: 'grid', gap: 10 }}>
@@ -271,8 +274,8 @@ export function Onboarding() {
           {!canAdvance ? (
             <p className="field-hint" role="status" style={{ margin: 0 }}>
               {n < WIZ_STEPS.length - 1
-                ? \`To continue, add \${missing.join(' and ')}.\`
-                : \`To finish, add \${missing.join(' and ')}.\`}
+                ? 'To continue, add ' + missing.join(' and ') + '.'
+                : 'To finish, add ' + missing.join(' and ') + '.'}
             </p>
           ) : null}
 
