@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useClerk } from '@clerk/react';
+import { useRef, useState } from 'react';
 import {
   ArrowDownTrayIcon, ArrowPathIcon, ComputerDesktopIcon,
-  CircleStackIcon, EnvelopeIcon, MoonIcon, ShieldCheckIcon,
+  CircleStackIcon, EnvelopeIcon, MoonIcon,
   SwatchIcon, TrashIcon, UserIcon,
 } from '@heroicons/react/24/outline';
 import { useStore } from '../../store';
-import { authClient } from '../../lib/authClient';
-import { oauthErrorCopy, readQueryError, takeQueryError } from '../../lib/oauthErrors';
+
 import { COLORWAYS } from '../../theme/palettes';
 import { ChipInput, ConfirmButton, ConfirmDialog, EditableAvatar } from '../../components/ui';
 import { COUNTRIES } from '../../lib/countries';
@@ -239,57 +239,23 @@ export function Settings() {
 }
 
 /**
- * Connected logins — the durable account-linking path. Signing in with
- * Google while an email account exists (or vice versa) links automatically
- * only for provider-verified emails; connecting here while signed in always
- * works and survives the upstream deprecation of implicit linking. Full
- * page redirect; success lands back on Settings, errors stay inline.
+ * Connected logins — Clerk's account portal owns OAuth connections now:
+ * one button opens the profile modal where Google/GitHub are linked,
+ * verified and count toward sign-in continuity.
  */
 function ConnectedLogins() {
   const { backend } = useStore();
-  const [busy, setBusy] = useState<string | null>(null);
-  const [msg, setMsg] = useState(() => oauthErrorCopy(readQueryError('error')) ?? '');
-  useEffect(() => { takeQueryError('error'); }, []);
+  const clerk = useClerk();
   if (!backend) return null;
-  const connect = (provider: 'google' | 'github') => {
-    setBusy(provider);
-    setMsg('');
-    void (authClient.linkSocial(
-      // Absolute origin: relative targets resolve against the auth baseURL
-      // (SITE_URL), not the page origin — same rationale as Auth.tsx.
-      { provider, callbackURL: `${window.location.origin}/settings`, errorCallbackURL: `${window.location.origin}/settings` },
-      {
-        onError: (ctx: unknown) => {
-          setBusy(null);
-          const err = (ctx as { error?: { message?: unknown } })?.error;
-          setMsg(typeof err?.message === 'string' && err.message !== ''
-            ? err.message
-            : 'Could not start the connection — try again.');
-        },
-      },
-    ) as unknown as Promise<unknown>).catch(() => {
-      setBusy(null);
-      setMsg('Could not start the connection — try again.');
-    });
-  };
   return (
-    <section className="card"><div className="card-pad" style={{ display: 'grid', gap: 12 }}>
-      <div className="set-head">
-        <span className="set-ic"><ShieldCheckIcon width={20} /></span>
-        <span style={{ flex: '1 1 auto', minWidth: 0 }}>
-          <strong className="t-h3">Connected logins</strong>
-          <span className="muted t-small">Link Google or GitHub so every login method reaches this same account.</span>
-        </span>
-      </div>
-      <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
-        {(['google', 'github'] as const).map(p => (
-          <button key={p} className="btn btn-ghost btn-sm" disabled={busy !== null}
-            onClick={() => connect(p)} aria-busy={busy === p}>
-            {busy === p ? `Connecting ${p}…` : `Connect ${p === 'google' ? 'Google' : 'GitHub'}`}
-          </button>
-        ))}
-      </div>
-      {msg !== '' ? <p className="muted t-small" role="status" style={{ margin: 0 }}>{msg}</p> : null}
+    <section className="card"><div className="card-pad">
+      <p className="sec-label">Connected logins</p>
+      <p className="muted t-small" style={{ margin: '4px 0 10px' }}>
+        Google and GitHub stay linked in your Clerk account portal — link keeps sign-in continuity across devices.
+      </p>
+      <button className="btn btn-ghost" onClick={() => { void clerk.openUserProfile(); }}>
+        Manage connections
+      </button>
     </div></section>
   );
 }

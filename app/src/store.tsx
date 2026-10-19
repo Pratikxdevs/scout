@@ -6,9 +6,9 @@ import { DemoApplicationService, DemoOutreachService, DemoProfileEnrichmentServi
 import { loadLegacy, loadStored, saveStored } from './lib/storage';
 import { validJobs } from './lib/validate';
 import { setSentryUser, hashUserId } from './lib/sentry';
-import { authClient, authSignOut, ensureSession } from './lib/authClient';
 import { currentRequestId, logger } from './lib/logger';
 import { backendOn, fetchUsage, apiFetch, toUserMessage, type Usage } from './services/api';
+import { authSignOut } from './lib/authClient';
 import { initialsFor, mergeServerProfile, profilePatch } from './lib/profileSync';
 import { prepareAvatar, blobToDataUrl } from './lib/imageScale';
 import { HttpApplicationService, HttpAvatarService, HttpJobService, HttpOutreachService, HttpProfileEnrichmentService, HttpResumeService } from './services/http';
@@ -45,6 +45,9 @@ interface Store {
   scannedAt: number | null; usage: Usage | null;
   backend: boolean; restoring: boolean;
   sidebarOpen: boolean; setSidebarOpen: (v: boolean) => void;
+  /** AuthBridge items — Clerk session sync + sign-out handoff. */
+  setRestoring: (v: boolean) => void;
+  setSignOutAction: (fn: (() => Promise<void>) | null) => void;
   hotReply: HotReply | null; dismissHotReply: () => void;
   search: string; selected: Job | null; colorway: string;
   go: (r: Route) => void; login: (email: string, opts?: { silent?: boolean }) => Promise<void>; signup: (name: string, email: string) => void; logout: () => void;
@@ -522,13 +525,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       enrichPolling.current = false;
       setEnrichment(null);
       setHotReply(null);
+      setSidebarOpen(false);
       logger.info('auth-logout', 'User logged out', {});
-      // Drop the cached Bearer JWT too — otherwise the next boot's first
-      // calls replay a dead token until the first 401 clears it.
-      void import('./lib/authClient.ts').then(m => m.clearAccessToken()).catch(() => undefined);
       void authSignOut().finally(() => {
         window.history.pushState({}, '', '/login'); setRoute('login');
       });
+      // Clerk session teardown (AuthBridge keeps the hook registered).
+      void signOutActionRef.current?.().catch(() => undefined);
     },
     signup: (name, email) => {
       setAuthed(true); setProfile(p => ({ ...p, name, email, initials: initialsFor(name, p.initials) }));
@@ -694,7 +697,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     clearApps: () => setApps([]),
     clearNotif: () => setNotif(0),
     setColorway,
-  }), [route, authed, restoring, onboarded, dark, profile, jobs, apps, sent, replies, notif, scanning, scannedAt, usage, search, selected, colorway, liveSearch, runLiveSearch, cancelLiveSearch, resume, uploadResume, setAvatarPhoto, enrichment, enrichBusy, startEnrichment, refreshEnrichment, pasteEnrichmentSource, hotReply, dismissHotReply]);
+    setRestoring,
+    setSignOutAction: (fn) => { signOutActionRef.current = fn; },
+  }), [route, authed, restoring, onboarded, dark, profile, jobs, apps, sent, replies, notif, scanning, scannedAt, usage, search, selected, colorway, sidebarOpen, liveSearch, runLiveSearch, cancelLiveSearch, resume, uploadResume, setAvatarPhoto, enrichment, enrichBusy, startEnrichment, refreshEnrichment, pasteEnrichmentSource, hotReply, dismissHotReply]);
 
   // Session restore (P2): after an OAuth redirect-back the browser holds a
   // valid session cookie but local state still says logged-out. Exactly one
@@ -706,51 +711,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // on every cookie-boot (OAuth return, fresh device, cleared storage).
   // StrictMode-safe: a cancelled probe result is dropped via `live` and the
   // re-run re-probes; once the decision is locked ('done') re-runs skip.
-  const restoreState = useRef<'idle' | 'inflight' | 'done'>('idle');
-  const authedRef = useRef(authed);
-  authedRef.current = authed;
-  useEffect(() => {
-    if (!useBackend) return;
-    if (authed) {
-      restoreState.current = 'done';
-      if (restoring) setRestoring(false);
-      return;
-    }
-    if (restoreState.current !== 'idle') return;
-    restoreState.current = 'inflight';
-    let live = true;
-    void authClient
-      .getSession()
-      .then(({ data }) => {
-        if (!live) return;
-        if (authedRef.current) { setRestoring(false); return; }
-        const email = data?.user?.email;
-        if (typeof email !== 'string' || email === '') {
-          // No cookie: the login screen is the honest page — settle now.
-          restoreState.current = 'done';
-          setRestoring(false);
-          return;
-        }
-        logger.info('auth-restore', 'Existing session found — signing in.', {});
-        // Lock the decision before the async settle: a StrictMode re-run or a
-        // racing manual submit must not start a second login.
-        restoreState.current = 'done';
-        void ensureSession();
-        void value.login(email, { silent: true }).finally(() => {
-          if (live) setRestoring(false);
-        });
-      })
-      .catch(() => {
-        if (!live) return;
-        restoreState.current = 'done';
-        setRestoring(false);
-        /* no session (or backend down) — stay logged out, silently */
-      });
-    return () => {
-      live = false;
-      if (restoreState.current === 'inflight') restoreState.current = 'idle';
-    };
-  }, [authed, restoring, value]);
+  // Clerk sign-out handoff: the AuthBridge registers signOut() here once the
+  // provider mounts; logout() delegates instead of poking Clerk directly.
+  const signOutActionRef = useRef<(() => Promise<void>) | null>(null);
+  // NOTE: the better-auth boot probe lived here; with Clerk the AuthBridge
+  // (components/AuthBridge.tsx) owns session restore + authed flips.
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

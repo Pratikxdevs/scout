@@ -1,4 +1,4 @@
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { sentryVitePlugin } from '@sentry/vite-plugin';
 
@@ -9,13 +9,6 @@ import { sentryVitePlugin } from '@sentry/vite-plugin';
 const withSentryMaps = Boolean(process.env.SENTRY_AUTH_TOKEN);
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '');
-  // Same-origin auth in dev: /api/auth/* proxies to the Convex deployment so
-  // Better Auth cookies are first-party (cross-site Set-Cookie gets blocked
-  // by third-party-cookie protections → "state not found" at callback).
-  // Production serves the SPA + API from one origin — no proxy needed.
-  const authTarget =
-    env.VITE_AUTH_PROXY_TARGET ?? 'https://healthy-oyster-548.convex.site';
   return {
     plugins: [
     react(),
@@ -41,21 +34,9 @@ export default defineConfig(({ mode }) => {
   server: {
     port: 2992,
     host: '0.0.0.0',
-    proxy: {
-      '/api/auth': {
-        target: authTarget,
-        changeOrigin: true,
-        secure: true,
-      },
-      // Same-origin data API in dev: /api/v1/* proxies to Convex so the
-      // session cookie stays first-party (cross-site Set-Cookie/send gets
-      // blocked → every authed call 401s). Mirrors prod single-origin.
-      '/api/v1': {
-        target: authTarget,
-        changeOrigin: true,
-        secure: true,
-      },
-    },
+    // Clerk + Convex talk to their first-party hosts directly (no
+    // same-origin proxy needed). Legacy /api/auth + /api/v1 proxies were
+    // removed with the Better Auth stack.
   },
   preview: { port: 2992, host: '0.0.0.0' },
   build: {

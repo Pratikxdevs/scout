@@ -11,6 +11,7 @@
     "preview": "vite preview --port 2992 --host 0.0.0.0"
   },
   "dependencies": {
+    "@clerk/react": "^6.17.8",
     "@convex-dev/better-auth": "^0.12.5",
     "@heroicons/react": "^2.2.0",
     "@sentry/react": "^11.6.0",
