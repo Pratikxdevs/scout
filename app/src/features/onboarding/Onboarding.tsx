@@ -1,82 +1,122 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  ArrowRightIcon, BriefcaseIcon, CheckIcon, EnvelopeIcon, MagnifyingGlassIcon, MapPinIcon, UserIcon,
+  ArrowRightIcon, CheckIcon, CloudArrowUpIcon, EnvelopeIcon, MapPinIcon, UserIcon, XMarkIcon,
 } from '@heroicons/react/24/outline';
-import { useStore } from '../../store';
+import { DEFAULT_PROFILE, useStore } from '../../store';
 import { COUNTRIES } from '../../lib/countries';
 import { initialsFor } from '../../lib/profileSync';
 import { isValidEmail } from '../../lib/validate';
-import { ChipInput, EditableAvatar, stagger } from '../../components/ui';
+import { SALARY_FLOORS, salaryPlus } from '../../lib/salary';
+import { initialDraft, type OnboardingDraft } from '../../lib/onboardingDraft';
+import { RESUME_ACCEPT, resumeMimeForFile } from '../../lib/resume';
+import { ChipInput, EditableAvatar } from '../../components/ui';
 
-/* Onboarding (3 steps): Scout's ICP wizard. A freelancer tells Scout what
- * they sell, who they sell to, and what a good engagement looks like. That
- * profile drives query planning (backend SPEC §4) and lead scoring
- * (SPEC §8). No resume, no enrichment — every field is typed directly and
- * everything stays editable in Settings. A live preview mirrors each step
- * so the ICP being built is never abstract. */
+/* Onboarding (4 steps) — the dev wizard restored exactly, with the ICP as
+ * the fourth step. Personal / Experience / Skills seed the profile the dev
+ * build had; ICP (industries, search phrases, budget range) is Scout's
+ * operating brief that drives query planning (backend SPEC §4) and lead
+ * scoring (SPEC §8). Everything stays editable in Settings. */
 
-const WIZ_STEPS = ['You', 'Services', 'Targeting'];
+const WIZ_STEPS = ['Personal', 'Experience', 'Skills', 'ICP'];
 const WIZ_WORK = ['Remote', 'Hybrid', 'On-site'];
+const WIZ_PAY = SALARY_FLOORS.map(salaryPlus);
 /** Per-engagement deal sizes the user targets (USD, client-side presets). */
 const WIZ_BUDGET = [500, 1000, 2500, 5000, 10000, 25000, 50000, 100000];
 const fmtMoney = (n: number): string => (n >= 1000 ? '$' + (n / 1000).toString().replace(/\.0$/, '') + 'k' : '$' + n);
+/** Client mirror of server resume limits — fail fast, same limit. */
+const MAX_RESUME_BYTES = 10 * 1024 * 1024;
 
-const STEP_HEAD = [
-  { title: 'Your basics', sub: 'Who you are and where you work — used to prefill outreach drafts.' },
-  { title: 'What you sell', sub: 'Services and tools; these seed the hunt query planning.' },
-  { title: 'Who you target', sub: 'Client types, search phrases and the deal sizes worth hunting.' },
-] as const;
-
-const STEP_ICON = [UserIcon, BriefcaseIcon, MagnifyingGlassIcon];
+/** The SCOUT wizard draft: the tested OnboardingDraft seed plus the ICP
+ * fields the fourth step owns. */
+type WizDraft = OnboardingDraft & {
+  industries: string[];
+  keywords: string[];
+  minBudget: number | null;
+  maxBudget: number | null;
+};
 
 function withCurrent(list: string[], cur: string) {
   return cur && !list.includes(cur) ? [cur, ...list] : list;
 }
 
-function budgetLabel(lo: number | null, hi: number | null): string {
-  if (lo !== null && hi !== null) return fmtMoney(lo) + '–' + fmtMoney(hi) + ' per project';
-  if (lo !== null) return fmtMoney(lo) + '+ per project';
-  if (hi !== null) return 'Up to ' + fmtMoney(hi) + ' per project';
-  return 'Budgets open — any deal size counts';
+function Dropzone({ file, busy, onFile, onClear }: {
+  file: { name: string } | null;
+  busy: boolean;
+  onFile: (f: File) => void;
+  onClear: () => void;
+}) {
+  const [drag, setDrag] = useState(false);
+  const ref = useRef<HTMLInputElement>(null);
+  /* Container is not a button (avoids a button nested in role=button);
+   * a real Browse button opens the picker; the container handles drop. */
+  return (
+    <div className="dropzone" data-drag={drag} data-on={!!file}
+      onDragOver={e => { e.preventDefault(); setDrag(true); }}
+      onDragLeave={() => setDrag(false)}
+      onDrop={e => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) onFile(f); }}>
+      <input ref={ref} type="file" accept={RESUME_ACCEPT} hidden
+        aria-label="Resume file"
+        onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile(f); }} />
+      {file ? (
+        <span className="row" style={{ justifyContent: 'center' }}>
+          <strong className="t-small ell" style={{ maxWidth: 280 }}>{file.name}</strong>
+          <button type="button" className="icon-btn" aria-label="Remove resume" disabled={busy} onClick={onClear}>
+            <XMarkIcon width={15} />
+          </button>
+        </span>
+      ) : (<>
+        <CloudArrowUpIcon width={30} aria-hidden="true" />
+        <strong className="t-small">{busy ? 'Uploading…' : 'Upload your resume'}</strong>
+        <span className="muted t-caption">PDF or DOCX · up to 10 MB — the file stays in this browser; Scout reads resumes after the hunt pipeline ships</span>
+        <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => ref.current?.click()}>
+          Browse files
+        </button>
+      </>)}
+    </div>
+  );
 }
 
 export function Onboarding() {
   const { profile, onboarded, update, onboard, setAvatarPhoto } = useStore();
   const [n, setN] = useState(0);
   const [avatarBusy, setAvatarBusy] = useState(false);
-  const [d, setD] = useState(() => ({
-    name: profile.name, email: profile.email, country: profile.country, city: profile.city, summary: profile.summary,
-    services: profile.services ?? [], skills: profile.skills ? profile.skills.split(',').map(s => s.trim()).filter(Boolean) : [],
+  const [message, setMessage] = useState('');
+  const [d, setD] = useState<WizDraft>(() => ({
+    ...initialDraft(profile, onboarded, DEFAULT_PROFILE),
     industries: profile.industries ?? [], keywords: profile.keywords ?? [],
-    workType: profile.location || 'Remote', remote: profile.remote,
     minBudget: profile.minBudget ?? null, maxBudget: profile.maxBudget ?? null,
   }));
+  // `touched` tracks typing in the text fields only — resume/photo picks
+  // must not block anything else. Anything typed is never clobbered.
   const touched = useRef(false);
 
   // Late hydration (the server profile lands a round trip after login)
   // refills the draft, but only while the user hasn't typed anything.
   useEffect(() => {
-    if (touched.current || onboarded) return;
-    setD(prev => ({
-      ...prev,
-      name: profile.name || prev.name, email: profile.email || prev.email,
-      country: profile.country || prev.country, city: profile.city || prev.city,
-    }));
+    if (touched.current) return;
+    setD({
+      ...initialDraft(profile, onboarded, DEFAULT_PROFILE),
+      industries: profile.industries ?? [], keywords: profile.keywords ?? [],
+      minBudget: profile.minBudget ?? null, maxBudget: profile.maxBudget ?? null,
+    });
   }, [profile, onboarded]);
 
-  const patch = (p: Partial<typeof d>) => { touched.current = true; setD(prev => ({ ...prev, ...p })); };
-  const countryNames = COUNTRIES.map(c => c.name);
+  const patch = (p: Partial<WizDraft>) => { touched.current = true; setD(prev => ({ ...prev, ...p })); };
+  const skills = d.skills;
+  const countryNames = withCurrent(COUNTRIES.map(c => c.name), d.country);
+  const minOk = d.minBudget === null || d.maxBudget === null || d.minBudget <= d.maxBudget;
 
   const toProfile = () => ({
     name: d.name, email: d.email, country: d.country, city: d.city, summary: d.summary,
-    roles: d.services, services: d.services, industries: d.industries, keywords: d.keywords,
-    location: d.workType, remote: d.remote, minBudget: d.minBudget, maxBudget: d.maxBudget,
-    skills: d.skills.join(', '), resume: '',
+    roles: d.roles, services: d.roles, industries: d.industries, keywords: d.keywords,
+    location: d.workType, salary: d.salary, remote: d.remote,
+    minBudget: d.minBudget, maxBudget: d.maxBudget,
+    skills: d.skills.join(', '), resume: d.resumeName,
   });
 
   // Autosave progress (debounced) once the user has actually typed: the
   // draft persists through the profile store, so a reload keeps the wizard
-  // where it was.
+  // where it was. The untouched seed draft is never written.
   useEffect(() => {
     if (!touched.current) return;
     const t = window.setTimeout(() => update(toProfile()), 800);
@@ -85,64 +125,77 @@ export function Onboarding() {
   }, [d]);
 
   const emailOk = d.email.trim() !== '' && isValidEmail(d.email);
-  const minOk = d.minBudget === null || d.maxBudget === null || d.minBudget <= d.maxBudget;
+  // What still blocks this step — the Continue/Finish button is disabled
+  // and the exact gap is named, never a silent dead button.
   const missing = n === 0
-    ? [!d.name.trim() && 'your name', !emailOk && 'a valid email'].filter(Boolean)
+    ? [d.name.trim() === '' ? 'your name' : '', !emailOk ? 'a valid work email' : ''].filter(Boolean)
     : n === 1
-      ? [d.services.length === 0 && 'at least one service'].filter(Boolean)
-      : [d.industries.length === 0 && 'at least one target industry', !minOk && 'a valid budget range'].filter(Boolean);
+      ? [d.roles.length === 0 ? 'at least one target role' : ''].filter(Boolean)
+      : n === 2
+        ? [skills.length === 0 ? 'at least one skill' : ''].filter(Boolean)
+        : [d.industries.length === 0 ? 'at least one target industry' : '', !minOk ? 'a valid budget range' : ''].filter(Boolean);
   const canAdvance = missing.length === 0;
 
-  const pickAvatar = async (file: File) => {
-    setAvatarBusy(true);
-    try { await setAvatarPhoto(file); } finally { setAvatarBusy(false); }
+  const pickResume = async (file: File) => {
+    if (resumeMimeForFile(file) === null) {
+      setMessage(`"${file.name}" isn't a PDF or DOCX — export your resume in one of those formats and try again.`);
+      return;
+    }
+    if (file.size > MAX_RESUME_BYTES) {
+      setMessage(`"${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)} MB — resumes must be 10 MB or smaller.`);
+      return;
+    }
+    patch({ resumeName: file.name });
+    setMessage(`"${file.name}" attached — the file stays on this device. AI resume drafting isn't wired into this build yet; fill the form yourself for now.`);
   };
 
   return (
     <div className="wiz-wrap">
-      <header style={{ display: 'grid', gap: 6, justifyItems: 'start' }}>
-        <h1 className="t-display" style={{ margin: 0 }}>Build your ICP</h1>
-        <p className="muted t-small" style={{ margin: 0 }}>
-          Scout's operating brief — how hunts get planned and how every lead gets scored. Everything stays editable in Settings.
-        </p>
-      </header>
-
-      <ol className="wiz-steps" aria-label="Wizard progress">
+      <h1 className="t-display">Onboarding wizard</h1>
+      <ol className="wiz-steps">
         {WIZ_STEPS.map((s, i) => (
           <li key={s} className="wiz-step" data-state={i < n ? 'done' : i === n ? 'now' : 'todo'}>
             <span className="wiz-dot">{i < n ? <CheckIcon width={15} /> : i + 1}</span>
             <span className="wiz-name">{s}</span>
             {i < WIZ_STEPS.length - 1 ? (
-              <span className="wiz-bar" aria-hidden="true"><span style={{ width: i < n ? '100%' : i === n ? '35%' : '0%' }} /></span>
+              <span className="wiz-bar"><span style={{ width: i < n ? '100%' : i === n ? '35%' : '0%' }} /></span>
             ) : null}
           </li>
         ))}
       </ol>
 
       <div className="wiz-grid">
-        {/* live preview — one surface that mirrors every step's edits */}
-        <section className="card rise" style={stagger(0)} aria-live="polite"><div className="card-pad" style={{ display: 'grid', gap: 14, alignContent: 'start' }}>
-          <p className="sec-label" style={{ margin: 0 }}>Live ICP preview</p>
+        {/* live preview */}
+        <section className="card"><div className="card-pad" style={{ display: 'grid', gap: 14, alignContent: 'start' }}>
+          <p className="sec-label" style={{ margin: 0 }}>Profile preview</p>
           <div style={{ display: 'grid', justifyItems: 'center', gap: 8, textAlign: 'center' }}>
             <EditableAvatar url={profile.avatarUrl} initials={initialsFor(d.name, '')}
-              size={96} busy={avatarBusy} onPick={pickAvatar} />
-            <h2 className="t-h1" style={{ margin: 0 }}>{d.name.trim() || 'Your name'}</h2>
+              size={96} busy={avatarBusy} onPick={async f => { setAvatarBusy(true); try { await setAvatarPhoto(f); } finally { setAvatarBusy(false); } }} />
+            <h2 className="t-h1" style={{ margin: 0 }}>{d.name || 'Your Name'}</h2>
             <p className="muted t-small" style={{ margin: 0 }}>
-              {d.services.length > 0 ? d.services.join(' · ') : 'Add the services you sell in step 2'}
+              {d.roles.length > 0 ? d.roles.join(' · ') : 'Add the roles you want in step 2'}
             </p>
           </div>
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-            <h3 className="t-h3">Intro</h3>
+            <h3 className="t-h3">Professional summary</h3>
             <p className="muted t-small" style={{ margin: '6px 0 0' }}>
-              {d.summary.trim() || 'A one-line intro of what you do and who you do it for.'}
+              {d.summary || 'Write a short summary of your background and goals.'}
             </p>
           </div>
           <div>
-            <h3 className="t-h3">Clients you're hunting</h3>
+            <h3 className="t-h3">Skills</h3>
+            <div className="row" style={{ flexWrap: 'wrap', marginTop: 8 }}>
+              {skills.length > 0
+                ? skills.map(s => <span key={s} className="prev-pill">{s}</span>)
+                : <span className="muted t-caption">No skills yet — add them in step 3.</span>}
+            </div>
+          </div>
+          <div>
+            <h3 className="t-h3">Your ICP</h3>
             <div className="row" style={{ flexWrap: 'wrap', marginTop: 8 }}>
               {d.industries.length > 0
                 ? d.industries.map(s => <span key={s} className="prev-pill">{s}</span>)
-                : <span className="muted t-caption">No target client types yet — add them in step 3.</span>}
+                : <span className="muted t-caption">No target client types yet — add them in step 4.</span>}
             </div>
             {d.keywords.length > 0 ? (
               <div className="row" style={{ flexWrap: 'wrap', marginTop: 10 }}>
@@ -150,135 +203,166 @@ export function Onboarding() {
               </div>
             ) : null}
           </div>
-          <div>
-            <h3 className="t-h3">Skills</h3>
-            <div className="row" style={{ flexWrap: 'wrap', marginTop: 8 }}>
-              {d.skills.length > 0
-                ? d.skills.map(s => <span key={s} className="prev-pill">{s}</span>)
-                : <span className="muted t-caption">No skills yet — add them in step 2.</span>}
-            </div>
-          </div>
           <p className="muted t-caption" style={{ borderTop: '1px solid var(--border)', paddingTop: 14, margin: 0 }}>
             {[d.city, d.country].filter(Boolean).join(', ') || 'Set your location in step 1'}
-            {' · '}{d.workType}
-            {' · '}{budgetLabel(d.minBudget, d.maxBudget)}
+            {' · '}{budgetLine(d.minBudget, d.maxBudget)} · Live preview updates as you edit.
           </p>
         </div></section>
 
         {/* step panel */}
-        <section className="card rise" style={stagger(1)}><div className="card-pad" style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
-          <div key={n} className="wiz-step-in" style={{ display: 'grid', gap: 4 }}>
-            <h2 className="t-h1" style={{ display: 'flex', alignItems: 'center', gap: 10, margin: 0 }}>
-              <span style={{ display: 'inline-flex', width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', background: 'color-mix(in srgb, var(--ink) 7%, transparent)' }} aria-hidden="true">
-                {(() => { const I = STEP_ICON[n]; return <I width={17} />; })()}
+        <section className="card"><div className="card-pad" style={{ display: 'grid', gap: 14, alignContent: 'start' }}>
+          {n === 0 ? (<>
+            <div>
+              <h2 className="t-h1">Build your profile</h2>
+              <p className="muted t-small" style={{ margin: '4px 0 0' }}>Tell us about yourself — and set up the brain that plans your hunts.</p>
+            </div>
+          </>) : null}
+          {n === 1 ? (<>
+            <div>
+              <h2 className="t-h1">Your experience</h2>
+              <p className="muted t-small" style={{ margin: '4px 0 0' }}>What roles are you hunting for?</p>
+            </div>
+          </>) : null}
+          {n === 2 ? (<>
+            <div>
+              <h2 className="t-h1">Your skills</h2>
+              <p className="muted t-small" style={{ margin: '4px 0 0' }}>Add the tools you want to be matched on. Press Enter to add — as many as you like.</p>
+            </div>
+          </>) : null}
+          {n === 3 ? (<>
+            <div>
+              <h2 className="t-h1">Your ICP</h2>
+              <p className="muted t-small" style={{ margin: '4px 0 0' }}>Ideal customer profile — the client types, search phrases and deal sizes Scout hunts and scores against.</p>
+            </div>
+          </>) : null}
+
+          {message !== '' ? (
+            <p className="card-inner t-small" role="status" style={{ margin: 0, display: 'grid', gap: 8 }}>
+              <span>{message}</span>
+            </p>
+          ) : null}
+
+          {n === 0 ? (<>
+            <div>
+              <label className="lbl" htmlFor="wiz-name">Full name</label>
+              <span className="icon-field">
+                <span aria-hidden="true" className="icon-field-ic"><UserIcon width={16} /></span>
+                <input id="wiz-name" placeholder="Enter your name" value={d.name} onChange={e => patch({ name: e.target.value })} />
               </span>
-              {STEP_HEAD[n].title}
-            </h2>
-            <p className="muted t-small" style={{ margin: 0 }}>{STEP_HEAD[n].sub}</p>
-          </div>
+            </div>
+            <div>
+              <label className="lbl" htmlFor="wiz-email">Work email</label>
+              <span className="icon-field">
+                <span aria-hidden="true" className="icon-field-ic"><EnvelopeIcon width={16} /></span>
+                <input id="wiz-email" type="email" placeholder="you@example.com" value={d.email} onChange={e => patch({ email: e.target.value })}
+                  aria-invalid={d.email.trim() !== '' && !isValidEmail(d.email) || undefined} />
+              </span>
+            </div>
+            <div className="row" style={{ gap: 12, alignItems: 'end' }}>
+              <span style={{ flex: '1 1 auto', minWidth: 0 }}>
+                <label className="lbl" htmlFor="wiz-country">Country</label>
+                <select id="wiz-country" value={d.country} onChange={e => patch({ country: e.target.value })}>
+                  <option value="">Select a country…</option>
+                  {countryNames.map(name => <option key={name} value={name}>{name}</option>)}
+                </select>
+              </span>
+              <span style={{ flex: '1 1 auto', minWidth: 0 }}>
+                <label className="lbl" htmlFor="wiz-city">City</label>
+                <span className="icon-field">
+                  <span aria-hidden="true" className="icon-field-ic"><MapPinIcon width={16} /></span>
+                  <input id="wiz-city" placeholder="City" value={d.city} onChange={e => patch({ city: e.target.value })} />
+                </span>
+              </span>
+            </div>
+            <div>
+              <label className="lbl" htmlFor="wiz-summary">Professional summary</label>
+              <textarea id="wiz-summary" rows={3} placeholder="Describe your background and goals..."
+                value={d.summary} onChange={e => patch({ summary: e.target.value })} />
+            </div>
+            <div>
+              <span className="lbl">Resume</span>
+              <Dropzone file={d.resumeName ? { name: d.resumeName } : null} busy={false}
+                onFile={pickResume} onClear={() => patch({ resumeName: '' })} />
+            </div>
+          </>) : null}
 
-          <div key={'body-' + n} className="wiz-step-in" style={{ display: 'grid', gap: 14, alignContent: 'start' }}>
-            {n === 0 ? (<>
-              <div className="row" style={{ gap: 12 }}>
-                <span style={{ flex: '1 1 auto', minWidth: 0, display: 'grid', gap: 10 }}>
-                  <label className="lbl" htmlFor="wiz-name">Your name</label>
-                  <span className="icon-field">
-                    <span aria-hidden="true" className="icon-field-ic"><UserIcon width={16} /></span>
-                    <input id="wiz-name" placeholder="e.g. Maya Lane" value={d.name} onChange={e => patch({ name: e.target.value })} />
-                  </span>
-                </span>
-                <span style={{ flex: '1 1 auto', minWidth: 0, display: 'grid', gap: 10 }}>
-                  <label className="lbl" htmlFor="wiz-email">Email</label>
-                  <span className="icon-field">
-                    <span aria-hidden="true" className="icon-field-ic"><EnvelopeIcon width={16} /></span>
-                    <input id="wiz-email" type="email" placeholder="you@studio.com" value={d.email}
-                      onChange={e => patch({ email: e.target.value })}
-                      aria-invalid={d.email.trim() !== '' && !emailOk || undefined} />
-                  </span>
-                </span>
-              </div>
-              <div className="row" style={{ gap: 12 }}>
-                <span style={{ flex: '1 1 auto', minWidth: 0, display: 'grid', gap: 10 }}>
-                  <label className="lbl" htmlFor="wiz-city">City</label>
-                  <span className="icon-field">
-                    <span aria-hidden="true" className="icon-field-ic"><MapPinIcon width={16} /></span>
-                    <input id="wiz-city" placeholder="City" value={d.city} onChange={e => patch({ city: e.target.value })} />
-                  </span>
-                </span>
-                <span style={{ flex: '2 1 60%', minWidth: 0, display: 'grid', gap: 10 }}>
-                  <label className="lbl" htmlFor="wiz-country">Country</label>
-                  <input id="wiz-country" list="wiz-countries" placeholder="Country" value={d.country}
-                    onChange={e => patch({ country: e.target.value })} />
-                  <datalist id="wiz-countries">
-                    {countryNames.map(c => <option key={c} value={c} />)}
-                  </datalist>
-                </span>
-              </div>
-              <div>
-                <label className="lbl" htmlFor="wiz-summary">One-line intro</label>
-                <textarea id="wiz-summary" rows={3} placeholder="What do you do, and who do you do it for?"
-                  value={d.summary} onChange={e => patch({ summary: e.target.value })} />
-              </div>
-            </>) : null}
+          {n === 1 ? (<>
+            <div>
+              <label className="lbl" htmlFor="wiz-roles">Roles you're targeting</label>
+              <ChipInput id="wiz-roles" values={d.roles} max={10} onChange={roles => patch({ roles })}
+                placeholder="Type a role, press Enter (up to 10)" />
+            </div>
+            <div className="row" style={{ gap: 12, alignItems: 'end' }}>
+              <span style={{ flex: '1 1 auto', minWidth: 0 }}>
+                <label className="lbl" htmlFor="wiz-work">Work type</label>
+                <select id="wiz-work" value={d.workType} onChange={e => patch({ workType: e.target.value })}>
+                  {d.workType === '' ? <option value="" disabled>Choose…</option> : null}
+                  {withCurrent(WIZ_WORK, d.workType).map(r => <option key={r}>{r}</option>)}
+                </select>
+              </span>
+              <span style={{ flex: '1 1 auto', minWidth: 0 }}>
+                <label className="lbl" htmlFor="wiz-pay">Target salary</label>
+                <select id="wiz-pay" value={d.salary} onChange={e => patch({ salary: e.target.value })}>
+                  {d.salary === '' ? <option value="" disabled>Choose…</option> : null}
+                  {withCurrent(WIZ_PAY, d.salary).map(r => <option key={r}>{r}</option>)}
+                </select>
+              </span>
+            </div>
+            <label className="row t-small" style={{ gap: 8 }}>
+              <input type="checkbox" checked={d.remote} onChange={e => patch({ remote: e.target.checked })} /> Remote OK
+            </label>
+          </>) : null}
 
-            {n === 1 ? (<>
-              <div>
-                <label className="lbl" htmlFor="wiz-services">Services you sell</label>
-                <ChipInput id="wiz-services" values={d.services} max={10} onChange={services => patch({ services })}
-                  placeholder="Type a service, press Enter (up to 10)" />
-              </div>
-              <div>
-                <label className="lbl" htmlFor="wiz-skills">Skills / tools</label>
-                <ChipInput id="wiz-skills" values={d.skills} max={12} onChange={v => patch({ skills: v })}
-                  placeholder="python, figma, next.js..." />
-              </div>
-            </>) : null}
+          {n === 2 ? (<>
+            <div>
+              <label className="lbl" htmlFor="wiz-skills">Skills</label>
+              <ChipInput id="wiz-skills" values={skills} onChange={v => patch({ skills: v })} placeholder="Add a skill..." />
+            </div>
+          </>) : null}
 
-            {n === 2 ? (<>
-              <div>
-                <label className="lbl" htmlFor="wiz-industries">Target industries / client types</label>
-                <ChipInput id="wiz-industries" values={d.industries} max={10}
-                  onChange={industries => patch({ industries })} placeholder="e.g. SaaS, ecommerce..." />
-              </div>
-              <div>
-                <label className="lbl" htmlFor="wiz-keywords">Search phrases to look for</label>
-                <ChipInput id="wiz-keywords" values={d.keywords} max={6} onChange={keywords => patch({ keywords })}
-                  placeholder='e.g. "webflow developer wanted"' />
-              </div>
-              <div className="row" style={{ gap: 12, alignItems: 'end' }}>
-                <span style={{ flex: '1 1 auto', minWidth: 0, display: 'grid', gap: 10 }}>
-                  <label className="lbl" htmlFor="wiz-budget-min">Budget from</label>
-                  <select id="wiz-budget-min" className="num" value={d.minBudget ?? ''} onChange={e => patch({ minBudget: e.target.value === '' ? null : Number(e.target.value) })}>
-                    <option value="">Any</option>
-                    {WIZ_BUDGET.map(b => <option key={b} value={b}>{fmtMoney(b)}</option>)}
-                  </select>
-                </span>
-                <span style={{ flex: '1 1 auto', minWidth: 0, display: 'grid', gap: 10 }}>
-                  <label className="lbl" htmlFor="wiz-budget-max">Budget up to</label>
-                  <select id="wiz-budget-max" className="num" value={d.maxBudget ?? ''} onChange={e => patch({ maxBudget: e.target.value === '' ? null : Number(e.target.value) })}>
-                    <option value="">Any</option>
-                    {WIZ_BUDGET.map(b => <option key={b} value={b}>{fmtMoney(b)}</option>)}
-                  </select>
-                </span>
-                <span style={{ flex: '1 1 auto', minWidth: 0, display: 'grid', gap: 10 }}>
-                  <label className="lbl" htmlFor="wiz-work">Work setup</label>
-                  <select id="wiz-work" value={d.workType} onChange={e => patch({ workType: e.target.value })}>
-                    {withCurrent(WIZ_WORK, d.workType).map(r => <option key={r}>{r}</option>)}
-                  </select>
-                </span>
-              </div>
-              {!minOk ? <p className="field-err" style={{ margin: 0 }}>Minimum budget must be at most the maximum.</p> : null}
-            </>) : null}
-          </div>
+          {n === 3 ? (<>
+            <div>
+              <label className="lbl" htmlFor="wiz-industries">Target industries / client types</label>
+              <ChipInput id="wiz-industries" values={d.industries} max={10}
+                onChange={industries => patch({ industries })} placeholder="e.g. SaaS, ecommerce..." />
+            </div>
+            <div>
+              <label className="lbl" htmlFor="wiz-keywords">Search phrases to look for</label>
+              <ChipInput id="wiz-keywords" values={d.keywords} max={6} onChange={keywords => patch({ keywords })}
+                placeholder='e.g. "webflow developer wanted"' />
+            </div>
+            <div className="row" style={{ gap: 12, alignItems: 'end' }}>
+              <span style={{ flex: '1 1 auto', minWidth: 0 }}>
+                <label className="lbl" htmlFor="wiz-budget-min">Budget from</label>
+                <select id="wiz-budget-min" className="num" value={d.minBudget ?? ''} onChange={e => patch({ minBudget: e.target.value === '' ? null : Number(e.target.value) })}>
+                  <option value="">Any</option>
+                  {WIZ_BUDGET.map(b => <option key={b} value={b}>{fmtMoney(b)}</option>)}
+                </select>
+              </span>
+              <span style={{ flex: '1 1 auto', minWidth: 0 }}>
+                <label className="lbl" htmlFor="wiz-budget-max">Budget up to</label>
+                <select id="wiz-budget-max" className="num" value={d.maxBudget ?? ''} onChange={e => patch({ maxBudget: e.target.value === '' ? null : Number(e.target.value) })}>
+                  <option value="">Any</option>
+                  {WIZ_BUDGET.map(b => <option key={b} value={b}>{fmtMoney(b)}</option>)}
+                </select>
+              </span>
+              <span style={{ flex: '1 1 auto', minWidth: 0 }}>
+                <label className="lbl" htmlFor="wiz-freelance-remote">Remote work</label>
+                <select id="wiz-freelance-remote" value={d.workType} onChange={e => patch({ workType: e.target.value })}>
+                  {withCurrent(WIZ_WORK, d.workType).map(r => <option key={r}>{r}</option>)}
+                </select>
+              </span>
+            </div>
+            {!minOk ? <p className="field-err" style={{ margin: 0 }}>Minimum budget must be at most the maximum.</p> : null}
+          </>) : null}
 
           {!canAdvance ? (
             <p className="field-hint" role="status" style={{ margin: 0 }}>
               {n < WIZ_STEPS.length - 1
-                ? 'To continue, add ' + missing.join(' and ') + '.'
-                : 'To finish, add ' + missing.join(' and ') + '.'}
+                ? `To continue, add ${missing.join(' and ')}.`
+                : `To finish, add ${missing.join(' and ')}.`}
             </p>
           ) : null}
-
           <div className="row" style={{ justifyContent: n > 0 ? 'space-between' : 'flex-end', gap: 10, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
             {n > 0 ? <button className="btn btn-ghost" onClick={() => setN(n - 1)}>Back</button> : null}
             <span className="row" style={{ gap: 10 }}>
@@ -294,4 +378,11 @@ export function Onboarding() {
       </div>
     </div>
   );
+}
+
+function budgetLine(lo: number | null, hi: number | null): string {
+  if (lo !== null && hi !== null) return fmtMoney(lo) + '–' + fmtMoney(hi) + ' per project';
+  if (lo !== null) return fmtMoney(lo) + '+ per project';
+  if (hi !== null) return 'Up to ' + fmtMoney(hi) + ' per project';
+  return 'Budgets open';
 }
