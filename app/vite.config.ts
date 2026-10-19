@@ -19,7 +19,7 @@ export default defineConfig(({ mode }) => {
             project: process.env.SENTRY_PROJECT,
             authToken: process.env.SENTRY_AUTH_TOKEN,
             release: {
-              name: process.env.SENTRY_RELEASE ?? 'jobwzrd-app@dev',
+              name: process.env.SENTRY_RELEASE ?? 'scout-app@dev',
               deploy: { env: process.env.SENTRY_ENVIRONMENT ?? 'staging' },
             },
             sourcemaps: {

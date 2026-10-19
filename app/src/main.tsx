@@ -3,7 +3,6 @@ import { createRoot } from 'react-dom/client';
 import { ConvexReactClient } from 'convex/react';
 import { ConvexProviderWithClerk } from 'convex/react-clerk';
 import { ClerkProvider, useAuth } from '@clerk/react';
-import { AuthBridge } from './components/AuthBridge';
 import App from './App';
 import './system.css';
 import { observePerf } from './lib/perf';
@@ -36,11 +35,12 @@ function boot(): void {
     const convex = new ConvexReactClient(url);
     // Clerk owns identity; ConvexProviderWithClerk feeds Convex the JWT
     // (`convex` template) so ctx.auth resolves inside every function.
+    // AuthBridge mounts INSIDE App's StoreProvider (it consumes the store);
+    // `clerk` prop tells App the Clerk layer is present.
     return (
       <ClerkProvider publishableKey={pk}>
         <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
-          <AuthBridge />
-          <App />
+          <App clerk />
         </ConvexProviderWithClerk>
       </ClerkProvider>
     );

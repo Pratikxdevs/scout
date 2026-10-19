@@ -4,4 +4,4 @@ Disallow: /login
 Disallow: /onboarding
 Disallow: /settings
 
-Sitemap: https://jobwzrd.app/sitemap.xml
+Sitemap: https://scoutlead.app/sitemap.xml

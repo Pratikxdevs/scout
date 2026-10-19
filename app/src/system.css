@@ -652,9 +652,11 @@ kbd { font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--bo
 .notif-row:hover { background: var(--paper); }
 .metric-tile-sm { width: 30px; height: 30px; border-radius: 10px; }
 /* ---- universal fixed topbar bezel (minimal: brand left, icons right) ---- */
+/* Full-bleed: the bar touches the viewport edges at every width — mobile
+   spans left+right; desktop extends all the way to the right edge. Only the
+   safe-area inset stays. */
 .uni-wrap { position: fixed; top: 0; left: 0; right: 0; z-index: 50;
-  padding: env(safe-area-inset-top, 0px) 7px 0; pointer-events: none; }
-@media (min-width: 768px) { .uni-wrap { padding-left: 12px; padding-right: 12px; } }
+  padding: env(safe-area-inset-top, 0px) 0 0; pointer-events: none; }
 .uni-nav { pointer-events: auto; position: relative; width: 100%; height: 48px; }
 @media (min-width: 768px) { .uni-nav { height: 56px; } }
 .uni-shape { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }

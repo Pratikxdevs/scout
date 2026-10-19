@@ -4,6 +4,7 @@ import { TopBar, Dock, Sidebar } from './components/shell';
 import { BackToTop, ScrollProgress, SkipLink } from './components/chrome';
 import { Skeleton } from './components/ui';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { AuthBridge } from './components/AuthBridge';
 import { Login, Signup } from './features/auth/Auth';
 import { Onboarding } from './features/onboarding/Onboarding';
 
@@ -110,6 +111,14 @@ function View() {
   );
 }
 
-export default function App() {
-  return <StoreProvider><View /></StoreProvider>;
+export default function App({ clerk = false }: { clerk?: boolean }) {
+  return (
+    <StoreProvider>
+      {/* Clerk must be inside StoreProvider — AuthBridge syncs Clerk's
+          session into the store, and only mounts when the Clerk layer is
+          configured (demo mode renders the app unwrapped). */}
+      {clerk ? <AuthBridge /> : null}
+      <View />
+    </StoreProvider>
+  );
 }

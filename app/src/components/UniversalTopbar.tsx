@@ -13,7 +13,7 @@ const UNI_BEZEL_D = 'M0,0 H1200 V48 Q1200,62 1186,62 H14 Q0,62 0,48 Z';
 export function UniversalTopbar() {
   const { go, notif, sidebarOpen, setSidebarOpen } = useStore();
   return (
-    <header className="uni-wrap fixed inset-x-0 top-0 z-50 px-[7px] md:px-3 pt-[env(safe-area-inset-top)] pointer-events-none">
+    <header className="uni-wrap fixed inset-x-0 top-0 z-50 pt-[env(safe-area-inset-top)] pointer-events-none">
       <nav className="uni-nav pointer-events-auto relative w-full h-12 md:h-14" aria-label="Primary">
         {/* SHAPE */}
         <svg

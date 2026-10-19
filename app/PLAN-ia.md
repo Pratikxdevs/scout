@@ -1,4 +1,4 @@
-# IA PLAN – jobwzrd app is 9 pages, not one (v3: blessed cut)
+# IA PLAN — legacy jobwzrd (pre-Scout) page inventory — superseded by docs/SCOUT-SPEC.md
 
 Revision 2026-10-11 (TASKS T4): the v2 16-route plan is superseded. Six
 surfaces were cut and folded — they stay removed:

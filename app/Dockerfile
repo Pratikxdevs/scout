@@ -1,8 +1,8 @@
-# jobwzrd app — production SPA image (node build → nginx static).
+# scout app — production SPA image (node build → nginx static).
 # Vite bakes VITE_* at BUILD time: pass values as --build-arg (see compose).
 # No secrets here — only public VITE_* vars. Debug Logs mode is compiled
 # out (VITE_DEBUG_LOGS=false) so the bundle carries zero Logs bytes.
-# Build from REPO ROOT: docker build -f app/Dockerfile -t jobwzrd/app .
+# Build from REPO ROOT: docker build -f app/Dockerfile -t scout/app .
 # Repo layout is preserved (/src/app, /src/server/...) so repo-relative
 # imports (e.g. ../../server/convex/_generated) resolve identically to host.
 FROM node:22-bookworm-slim AS build

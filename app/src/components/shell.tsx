@@ -101,6 +101,18 @@ export function Sidebar() {
   const { route, go, apps, profile, logout, usage, backend, sidebarOpen, setSidebarOpen } = useStore();
   const [confirmLogout, setConfirmLogout] = useState(false);
   const items = useSidebarNav();
+  // Mobile drawer: Escape closes it and the page behind stays put.
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSidebarOpen(false); };
+    window.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [sidebarOpen, setSidebarOpen]);
   // W8: server usage (today's counts) wins when configured. Shared caps
   // helper keeps this meter in step with Pipeline/Dashboard.
   const todayKey = todayStr();
@@ -119,7 +131,7 @@ export function Sidebar() {
             return (
               <a key={it.id} href={`/${it.route}`} aria-current={on ? 'page' : undefined}
                 className={'side-item' + (on ? ' on' : '')}
-                onClick={e => { e.preventDefault(); go(it.route as Route); }}>
+                onClick={e => { e.preventDefault(); setSidebarOpen(false); go(it.route as Route); }}>
                   <span style={{ display: 'inline-flex', width: 20 }}>{it.icon}</span>
                   <span style={{ flex: 1, minWidth: 0 }}>{it.label}</span>
                   {b != null ? <span className="mono t-micro" style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 999, padding: '0 8px' }}>{b}</span> : null}
