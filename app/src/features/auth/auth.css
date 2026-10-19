@@ -1,0 +1,191 @@
+/* Auth — mockup pass (login + signup share one shell).
+   Tokens win: every UI color resolves through var(--*); fixed hex appears
+   only for brand-logo tiles and the lime illustration accents. */
+.auth-page {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 20px;
+  overflow: hidden;
+  background: var(--paper);
+}
+.auth-page ::selection { background: color-mix(in srgb, var(--primary) 20%, transparent); }
+.auth-bg { position: absolute; inset: 0; pointer-events: none; animation: auth-bg-in .8s var(--ease) backwards; }
+.auth-bg svg { width: 100%; height: 100%; display: block; }
+.auth-stage {
+  position: relative;
+  z-index: 1;
+  width: min(1080px, 100%);
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* floating job cards — tucked BEHIND the form card, peeking from its edges */
+.auth-cards { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.auth-float {
+  position: absolute;
+  width: 252px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: 0 24px 70px rgba(20, 24, 40, .14);
+  padding: 18px;
+  display: grid;
+  gap: 10px;
+  --auth-rot: 0deg;
+  transform: rotate(var(--auth-rot));
+  animation: auth-float-in .55s var(--ease) backwards;
+}
+.auth-float[data-i="0"] { animation-delay: .1s; }
+.auth-float[data-i="1"] { animation-delay: .18s; }
+.auth-float[data-i="2"] { animation-delay: .26s; }
+/* signup: left-edge stack, right sides hidden behind the form */
+.auth-stage[data-layout="stack"] .auth-float[data-i="0"] { top: -32px; left: 50%; margin-left: -398px; --auth-rot: -7deg; }
+.auth-stage[data-layout="stack"] .auth-float[data-i="1"] { top: 192px; left: 50%; margin-left: -418px; --auth-rot: 5deg; }
+.auth-stage[data-layout="stack"] .auth-float[data-i="2"] { top: 408px; left: 50%; margin-left: -398px; --auth-rot: -4deg; }
+/* login: both sides — top-left, right-middle, bottom-left */
+.auth-stage[data-layout="sides"] .auth-float { width: 240px; }
+.auth-stage[data-layout="sides"] .auth-float[data-i="0"] { top: -70px; left: 50%; margin-left: -410px; --auth-rot: -5deg; }
+.auth-stage[data-layout="sides"] .auth-float[data-i="1"] { top: 200px; left: 50%; margin-left: 150px; --auth-rot: 6deg; }
+.auth-stage[data-layout="sides"] .auth-float[data-i="2"] { top: 380px; left: 50%; margin-left: -395px; --auth-rot: -6deg; }
+.auth-float-top { display: flex; align-items: center; gap: 10px; }
+.auth-float-co { font-size: 15px; font-weight: 600; }
+.auth-float-title { font-size: 18px; font-weight: 600; letter-spacing: -.02em; margin: 0; }
+.auth-float-tags { display: flex; gap: 8px; flex-wrap: wrap; }
+.auth-float-tag {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 13px;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+/* feature tiles — token-driven; the floating cards describe the product, not
+   fake job inventory */
+.auth-tile {
+  width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--primary); color: var(--primary-ink);
+}
+
+/* brand lockup (wizard-hat mark on ink tile) */
+.auth-brand { display: flex; align-items: center; gap: 10px; }
+.auth-badge {
+  width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
+  background: var(--ink);
+  display: inline-flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.auth-badge img { width: 24px; height: 24px; filter: invert(1); }
+.dark .auth-badge img { filter: none; }
+
+/* form card — floats above the job cards */
+.auth-card {
+  position: relative;
+  z-index: 2;
+  width: min(430px, 100%);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: 0 24px 70px rgba(20, 24, 40, .14);
+  animation: auth-card-in .45s var(--ease) backwards;
+}
+.auth-card-pad { padding: 28px; display: grid; gap: 16px; }
+.auth-title { font-size: 30px; line-height: 1.15; letter-spacing: -.025em; font-weight: 600; margin: 0; }
+.auth-sub { color: var(--muted); font-size: 14.5px; line-height: 1.55; margin: 4px 0 0; }
+.auth-form { display: grid; gap: 14px; }
+.auth-form input { caret-color: var(--primary); }
+.auth-form input::placeholder { color: var(--muted); opacity: 1; }
+.auth-pwrow { display: flex; gap: 8px; }
+.auth-pwrow .icon-field { flex: 1 1 auto; min-width: 0; }
+.auth-show {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--ink);
+  border-radius: 12px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.auth-show:hover { border-color: var(--muted); }
+.auth-cta {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%;
+  background: var(--primary); border: 1px solid var(--primary); color: var(--primary-ink);
+  border-radius: 999px; padding: 13px 18px;
+  font-size: 14.5px; font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(26, 35, 51, .22);
+  transition-property: filter, transform, box-shadow; transition-duration: .15s;
+}
+.auth-cta:hover { filter: brightness(1.2); box-shadow: 0 14px 30px rgba(26, 35, 51, .28); }
+.auth-cta:active { transform: scale(.96); }
+.auth-cta:disabled { opacity: .6; cursor: wait; box-shadow: none; }
+.auth-cta svg { width: 16px; height: 16px; transform: translateX(1px); transition-property: transform; transition-duration: .15s; }
+@media (hover: hover) and (pointer: fine) {
+  .auth-cta:hover svg { transform: translateX(4px); }
+}
+.auth-swap { margin: 0; text-align: center; font-size: 13px; }
+.auth-swap .link { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; font-weight: 500; }
+.auth-or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+.auth-or::before, .auth-or::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+.auth-social { display: flex; gap: 10px; }
+.auth-soc {
+  flex: 1 1 0; min-width: 0;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 10px 8px; font-size: 12.5px; font-weight: 500; color: var(--ink);
+  cursor: pointer; white-space: nowrap;
+  transition-property: border-color, transform; transition-duration: .15s;
+}
+.auth-soc:hover { border-color: var(--muted); }
+.auth-soc:active { transform: scale(.97); }
+.auth-soc > span { display: inline-flex; }
+.auth-foot {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: .08em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.auth-err { font-size: 12px; color: var(--danger); }
+.auth-hint { font-size: 12px; color: var(--muted); }
+
+/* entrance — one staged moment: backdrop fades, form rises, cards settle
+   in behind it at 80ms staggers. Transform + opacity only, ease-out. */
+@keyframes auth-bg-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes auth-card-in {
+  from { opacity: 0; transform: translateY(16px) scale(.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes auth-float-in {
+  from { opacity: 0; transform: translateY(24px) rotate(var(--auth-rot)); }
+  to { opacity: 1; transform: translateY(0) rotate(var(--auth-rot)); }
+}
+
+/* below 1200px the cluster can't clear the form — clean centered form + art */
+@media (max-width: 1199px) {
+  .auth-cards { display: none; }
+  .auth-stage { gap: 0; }
+}
+@media (max-width: 400px) {
+  .auth-page { padding: 32px 14px; }
+  .auth-card-pad { padding: 22px; }
+  .auth-social { flex-wrap: wrap; }
+  .auth-soc { flex: 1 1 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .auth-bg, .auth-card, .auth-float { animation: none; }
+  .auth-cta:active, .auth-soc:active { transform: none; }
+  .auth-cta svg { transform: none; }
+}

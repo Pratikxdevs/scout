@@ -1,0 +1,31 @@
+{
+  "name": "jobwzrd-app",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 2992 --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build",
+    "check": "tsc --noEmit",
+    "test": "node --test src/lib/*.test.ts src/debug/*.test.ts src/services/*.test.ts",
+    "preview": "vite preview --port 2992 --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@convex-dev/better-auth": "^0.12.5",
+    "@heroicons/react": "^2.2.0",
+    "@sentry/react": "^11.6.0",
+    "better-auth": "^1.6.33",
+    "convex": "^1.46.0",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1"
+  },
+  "devDependencies": {
+    "@sentry/vite-plugin": "^5.4.1",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.3"
+  }
+}
