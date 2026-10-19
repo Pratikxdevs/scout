@@ -11,6 +11,8 @@ export const LIMITS = {
     BATCH_SIZE: 5,
     /** Provider search queries per run (planner output cap). */
     MAX_QUERIES_PER_RUN: 3,
+    /** Sources a single run may target (one scoped query each). */
+    MAX_SOURCES_PER_RUN: 6,
     /** Attempts per task (B6). */
     MAX_ATTEMPTS: 2,
     /** Concurrent runs per user. */

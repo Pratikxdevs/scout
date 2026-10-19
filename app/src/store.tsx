@@ -12,6 +12,7 @@ import { authSignOut } from './lib/authClient';
 import { initialsFor } from './lib/profileSync';
 import { prepareAvatar, blobToDataUrl } from './lib/imageScale';
 import { resumeMimeForFile } from './lib/resume';
+import { DEFAULT_SOURCE_KEYS } from '../convex/lib/sources';
 import { useConvexAuth, useMutation, useQuery } from 'convex/react';
 import { api as convexApi } from '../convex/_generated/api';
 import type { Id } from '../convex/_generated/dataModel';
@@ -154,6 +155,8 @@ interface Store {
   resume: ResumeRecord | null;
   uploadResume: (file: File) => Promise<string>;
   liveSearch: LiveSearchState; runLiveSearch: (query: string, country: string) => Promise<void>;
+  /** Where the next hunt looks (source scoping, one scoped query each). */
+  huntSources: string[]; toggleHuntSource: (key: string) => void;
   cancelLiveSearch: () => Promise<void>;
 }
 const Ctx = createContext<Store>(null as unknown as Store);
@@ -230,6 +233,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [liveSearch, setLiveSearch] = useState<LiveSearchState>({ state: 'idle', message: '' });
   // The queued hunt this client started; the run hook streams its state.
   const [liveRunId, setLiveRunId] = useState<Id<'searchRuns'> | null>(null);
+  // Source scoping for the next hunt (TinyFish `site:` scope per source).
+  const [huntSources, setHuntSources] = useState<string[]>([...DEFAULT_SOURCE_KEYS]);
 
   /* ---------- Convex hooks (reactive, identity comes from Clerk) ---------- */
   const { isAuthenticated } = useConvexAuth();
@@ -405,12 +410,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * the leads list flows into the feed on completion. Demo mode is a no-op —
    * demo scanning lives in scan().
    */
+  const toggleHuntSource = useCallback((key: string): void => {
+    setHuntSources(prev => (prev.includes(key)
+      ? prev.filter(k => k !== key)
+      : [...prev, key].slice(0, 6)));
+  }, []);
+
   const runLiveSearch = async (query: string, _country: string): Promise<void> => {
     if (!serverReady) return;
     setLiveSearch({ state: 'running', message: 'Queuing hunt…' });
     setScanning(true);
     try {
-      const id = await createRun({ query: query.trim().slice(0, 200) });
+      const id = await createRun({ query: query.trim().slice(0, 200), sources: huntSources });
       setLiveRunId(id);
     } catch (err) {
       const clean = cleanConvexError(err);
@@ -485,6 +496,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     sidebarOpen, setSidebarOpen,
     hotReply, dismissHotReply,
     liveSearch, runLiveSearch, cancelLiveSearch,
+    huntSources, toggleHuntSource,
     setAvatarPhoto,
     resume,
     uploadResume,
@@ -668,7 +680,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setColorway,
     setRestoring,
     setSignOutAction: (fn) => { signOutActionRef.current = fn; },
-  }), [route, authed, restoring, onboarded, dark, profile, jobs, apps, sent, notif, scanning, scannedAt, usage, search, selected, colorway, sidebarOpen, liveSearch, serverReady, serverLeads, serverProfileRow, serverUsage, dismissHotReply, createRun, cancelRun, setLeadStatus, saveConvexProfile, ensureUser, liveRunId, resume, requestResumeUpload, attachResume]);
+  }), [route, authed, restoring, onboarded, dark, profile, jobs, apps, sent, notif, scanning, scannedAt, usage, search, selected, colorway, sidebarOpen, liveSearch, serverReady, serverLeads, serverProfileRow, serverUsage, dismissHotReply, createRun, cancelRun, setLeadStatus, saveConvexProfile, ensureUser, liveRunId, resume, requestResumeUpload, attachResume, huntSources]);
 
   // Clerk sign-out handoff: the AuthBridge registers signOut() here once the
   // provider mounts; logout() delegates instead of poking Clerk directly.

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowUpIcon } from '@heroicons/react/24/outline';
 import { useStore } from '../../store';
 import { CHIP_DOT, SEARCH_CHIPS, toggleChipToken } from '../../lib/searchChips';
+import { SOURCES } from '../../../convex/lib/sources';
 
 function DocMark() {
   return (
@@ -27,7 +28,7 @@ function DocMark() {
  * - submit disabled when empty; maps query to feed filters via setSearch + go('jobs')
  */
 export function SearchHome() {
-  const { setSearch, go } = useStore();
+  const { setSearch, go, huntSources, toggleHuntSource } = useStore();
   const [q, setQ] = useState('');
   const toggle = (label: string) => setQ(toggleChipToken(q, label));
   const submit = () => {
@@ -94,6 +95,31 @@ export function SearchHome() {
             </button>
           );
         })}
+      </div>
+
+      {/* Where the hunt looks — one scoped search per source (TinyFish
+          `site:` scope). Toggle freely; the next hunt uses what's on. */}
+      <div style={{ display: 'grid', gap: 8, justifyItems: 'center', marginTop: 18 }}>
+        <p className="muted t-caption" style={{ margin: 0 }}>
+          Where to hunt{huntSources.length > 0 ? ` — ${huntSources.length} source${huntSources.length === 1 ? '' : 's'}` : ' — whole web'}
+        </p>
+        <div className="search-chips" role="group" aria-label="Hunt sources">
+          {SOURCES.map(s => {
+            const on = huntSources.includes(s.key);
+            return (
+              <button
+                key={s.key}
+                onClick={() => toggleHuntSource(s.key)}
+                aria-pressed={on}
+                className="search-chip"
+                data-on={on}
+                title={`${s.label} — ${s.kind === 'jobs' ? 'job boards' : 'freelance marketplaces'}`}
+              >
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
       </div>
     </div>

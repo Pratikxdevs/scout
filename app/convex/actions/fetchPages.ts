@@ -6,6 +6,7 @@ import type { Id } from '../_generated/dataModel';
 import { LIMITS } from '../lib/limits';
 import { isAllowedFetchable, canonicalUrl } from '../lib/urls';
 import { fetchPages, runAgent, ProviderError } from '../providers/tinyfish';
+import { hostAllowed, resolveSources } from '../lib/sources';
 
 /**
  * Fetch (SPEC §9): bounded batches (≤5 URLs/call, ≤4 batches/run), excerpt
@@ -19,6 +20,9 @@ export const processFetchBatches = internalAction({
     if (run === null) return;                      // vanished
     if (run.status !== 'running' && run.status !== 'queued') return;
 
+    // A scoped run fetches only its sources' pages (defense in depth: the
+    // discovery filter already dropped off-source hits).
+    const sources = resolveSources(run.sources).slice(0, LIMITS.SEARCH.MAX_SOURCES_PER_RUN);
     let agentsUsed = 0;
     let lastError: string | null = null;
     const failures: string[] = [];
@@ -33,7 +37,9 @@ export const processFetchBatches = internalAction({
       })) as Claimed[];
       if (claimed.length === 0) break;
 
-      const urls = claimed.map(c => c.payload.url).filter(u => isAllowedFetchable(u));
+      const urls = claimed.map(c => c.payload.url)
+        .filter(u => isAllowedFetchable(u))
+        .filter(u => hostAllowed(u, sources));
       if (urls.length === 0) {
         for (const c of claimed) {
           await ctx.runMutation(internal.searchTasks.failOrRequeue, {

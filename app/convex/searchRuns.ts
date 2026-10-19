@@ -3,6 +3,7 @@ import { internal } from './_generated/api';
 import { v } from 'convex/values';
 import { requireActor, assertOwned } from './lib/actor';
 import { fail } from './lib/errors';
+import { resolveSources } from './lib/sources';
 import { LIMITS } from './lib/limits';
 
 /**
@@ -12,7 +13,11 @@ import { LIMITS } from './lib/limits';
  * owner-check (FORBIDDEN on someone else's run).
  */
 export const create = mutation({
-  args: { query: v.string() },
+  args: {
+    query: v.string(),
+    /** Optional source scoping (upwork, fiverr, linkedin, naukri, reddit…). */
+    sources: v.optional(v.array(v.string())),
+  },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
     const q = args.query.trim();
@@ -30,9 +35,11 @@ export const create = mutation({
     if (running.length + queued.length >= LIMITS.SEARCH.MAX_RUNNING_PER_USER) {
       throw fail('SEARCH_ACTIVE', `You already have ${LIMITS.SEARCH.MAX_RUNNING_PER_USER} hunts in flight. Wait or cancel one.`);
     }
+    const sources = resolveSources(args.sources).slice(0, LIMITS.SEARCH.MAX_SOURCES_PER_RUN);
     const runId = await ctx.db.insert('searchRuns', {
       userId: actor.userId,
       query: q,
+      sources: sources.length > 0 ? sources.map(s => s.key) : undefined,
       status: 'queued',
       resultCount: 0,
       queuedAt: Date.now(),

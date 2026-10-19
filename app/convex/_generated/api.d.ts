@@ -26,6 +26,7 @@ import type * as lib_prompt from "../lib/prompt.js";
 import type * as lib_resumeFiles from "../lib/resumeFiles.js";
 import type * as lib_resumeLimits from "../lib/resumeLimits.js";
 import type * as lib_scoring from "../lib/scoring.js";
+import type * as lib_sources from "../lib/sources.js";
 import type * as lib_urls from "../lib/urls.js";
 import type * as outreachDrafts from "../outreachDrafts.js";
 import type * as profiles from "../profiles.js";
@@ -62,6 +63,7 @@ declare const fullApi: ApiFromModules<{
   "lib/resumeFiles": typeof lib_resumeFiles;
   "lib/resumeLimits": typeof lib_resumeLimits;
   "lib/scoring": typeof lib_scoring;
+  "lib/sources": typeof lib_sources;
   "lib/urls": typeof lib_urls;
   outreachDrafts: typeof outreachDrafts;
   profiles: typeof profiles;

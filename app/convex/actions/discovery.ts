@@ -5,6 +5,7 @@ import { internal } from '../_generated/api';
 import { canonicalUrl } from '../lib/urls';
 import { LIMITS } from '../lib/limits';
 import { searchWeb, toProviderError } from '../providers/tinyfish';
+import { hostAllowed, resolveSources, type HuntSource } from '../lib/sources';
 
 /** Query planner lives at the bottom of this module — deterministic. */
 export const startSearch = internalAction({
@@ -18,7 +19,8 @@ export const startSearch = internalAction({
 
     const profile = await ctx.runQuery(internal.profiles.rowFor, { userId: run.userId }) as
       { services?: string[]; industries?: string[]; keywords?: string[] } | null;
-    const plan = planQueries(run.query, profile);
+    const sources = resolveSources(run.sources).slice(0, LIMITS.SEARCH.MAX_SOURCES_PER_RUN);
+    const plan = planQueries(run.query, profile, sources);
     await ctx.runMutation(internal.searchRuns.setPlanned, { runId: args.runId, plannedQueries: plan });
 
     // Provider per planner query; one retry per query on transient errors.
@@ -31,6 +33,8 @@ export const startSearch = internalAction({
           for (const h of hits) {
             const cu = canonicalUrl(h.url) ?? '';
             if (cu === '' || !cu.startsWith('https://')) continue;
+            // A scoped run only surfaces pages from the sources it targeted.
+            if (!hostAllowed(h.url, sources)) continue;
             if (candidates.size >= LIMITS.SEARCH.MAX_URLS_PER_RUN) break;
             if (!candidates.has(cu)) candidates.set(cu, { url: h.url, title: h.title, publishedAt: h.publishedAt });
           }
@@ -79,11 +83,19 @@ function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
-/** Deterministic query planner — cheap (no LLM), honest, sits on the ICP. */
+/** Deterministic query planner — cheap (no LLM), honest, sits on the ICP.
+ *
+ *  With sources: one scoped query per source (the provider ANDs multiple
+ *  `site:` terms, so two sources can never share a query). Without sources:
+ *  the generic three-query plan (ICP service, ICP keyword, budget probe). */
 export function planQueries(query: string, profile: {
   services?: string[]; industries?: string[]; keywords?: string[];
-} | null): string[] {
+} | null, sources: readonly HuntSource[] = []): string[] {
   const q = (query ?? '').trim();
+  if (sources.length > 0) {
+    const core = q === '' ? 'freelance project' : q;
+    return sources.map(s => `${core} ${s.scope}`.replace(/\s+/g, ' ').trim());
+  }
   const year = new Date().getFullYear();
   const service = profile?.services?.[0];
   const industry = profile?.industries?.[0];
