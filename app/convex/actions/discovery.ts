@@ -27,7 +27,7 @@ export const startSearch = internalAction({
     for (const [idx, planQuery] of plan.entries()) {
       for (let attempt = 0; attempt <= 1; attempt++) {
         try {
-          const { hits } = await searchWeb(ctx, planQuery);
+          const { hits } = await searchWeb(planQuery);
           for (const h of hits) {
             const cu = canonicalUrl(h.url) ?? '';
             if (cu === '' || !cu.startsWith('https://')) continue;

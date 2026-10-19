@@ -45,7 +45,7 @@ export const processFetchBatches = internalAction({
       }
 
       try {
-        const { pages, errors } = await fetchPages(ctx, urls);
+        const { pages, errors } = await fetchPages(urls);
         const byUrl = new Map(pages.map(p => [p.finalUrl ?? p.url, p]));
 
         for (const c of claimed) {
@@ -58,7 +58,7 @@ export const processFetchBatches = internalAction({
             // paywalls, cookie walls. Bounded ≤2 per run, goal is narrow.
             if (text.length < LIMITS.PAGE.MIN_USEFUL_TEXT && agentsUsed < LIMITS.AGENT.MAX_PER_RUN) {
               try {
-                const agentPage = await runAgent(ctx, raw, narrowGoal(stored));
+                const agentPage = await runAgent(raw, narrowGoal(stored));
                 text = agentPage.textMarkdown;
                 agentsUsed++;
                 await ctx.runMutation(internal.activityLogs.record, {
