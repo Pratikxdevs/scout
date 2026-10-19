@@ -7,9 +7,10 @@ import { COUNTRIES } from '../../lib/countries';
 import { initialsFor } from '../../lib/profileSync';
 import { isValidEmail } from '../../lib/validate';
 import { SALARY_FLOORS, salaryPlus } from '../../lib/salary';
-import { initialDraft, type OnboardingDraft } from '../../lib/onboardingDraft';
+import { applyExtracted, initialDraft, stageLabel, type OnboardingDraft } from '../../lib/onboardingDraft';
 import { RESUME_ACCEPT, resumeMimeForFile } from '../../lib/resume';
-import { ChipInput, EditableAvatar } from '../../components/ui';
+import { ChipInput, EditableAvatar, Status } from '../../components/ui';
+import type { ExtractedProfile } from '../../types';
 
 /* Onboarding (4 steps) — the dev wizard restored exactly, with the ICP as
  * the fourth step. Personal / Experience / Skills seed the profile the dev
@@ -39,9 +40,10 @@ function withCurrent(list: string[], cur: string) {
   return cur && !list.includes(cur) ? [cur, ...list] : list;
 }
 
-function Dropzone({ file, busy, onFile, onClear }: {
+function Dropzone({ file, busy, ai, onFile, onClear }: {
   file: { name: string } | null;
   busy: boolean;
+  ai: boolean;
   onFile: (f: File) => void;
   onClear: () => void;
 }) {
@@ -67,7 +69,7 @@ function Dropzone({ file, busy, onFile, onClear }: {
       ) : (<>
         <CloudArrowUpIcon width={30} aria-hidden="true" />
         <strong className="t-small">{busy ? 'Uploading…' : 'Upload your resume'}</strong>
-        <span className="muted t-caption">PDF or DOCX · up to 10 MB — the file stays in this browser; Scout reads resumes after the hunt pipeline ships</span>
+        <span className="muted t-caption">{ai ? 'PDF or DOCX · up to 10 MB — the AI drafts your profile from it' : 'PDF or DOCX · up to 10 MB — kept in this browser; no server upload in local mode'}</span>
         <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => ref.current?.click()}>
           Browse files
         </button>
@@ -77,10 +79,11 @@ function Dropzone({ file, busy, onFile, onClear }: {
 }
 
 export function Onboarding() {
-  const { profile, onboarded, update, onboard, setAvatarPhoto } = useStore();
+  const { profile, onboarded, update, onboard, setAvatarPhoto, resume, uploadResume, backend } = useStore();
   const [n, setN] = useState(0);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [aiDraft, setAiDraft] = useState<ExtractedProfile | null>(null);
   const [d, setD] = useState<WizDraft>(() => ({
     ...initialDraft(profile, onboarded, DEFAULT_PROFILE),
     industries: profile.industries ?? [], keywords: profile.keywords ?? [],
@@ -89,6 +92,8 @@ export function Onboarding() {
   // `touched` tracks typing in the text fields only — resume/photo picks
   // must not block anything else. Anything typed is never clobbered.
   const touched = useRef(false);
+  // `applied` guards the one-shot AI-draft application per resume row.
+  const applied = useRef(false);
 
   // Late hydration (the server profile lands a round trip after login)
   // refills the draft, but only while the user hasn't typed anything.
@@ -100,6 +105,27 @@ export function Onboarding() {
       minBudget: profile.minBudget ?? null, maxBudget: profile.maxBudget ?? null,
     });
   }, [profile, onboarded]);
+
+  // A resume may already exist server-side (fresh device / reload): show it.
+  useEffect(() => {
+    if (resume === null || touched.current) return;
+    setD(prev => (prev.resumeName === '' ? { ...prev, resumeName: resume.fileName } : prev));
+  }, [resume]);
+
+  // AI finished reading: fill the draft when the user hasn't typed; when
+  // they have, keep it behind one explicit "Apply AI draft" click.
+  useEffect(() => {
+    if (applied.current || resume === null || resume.extractionStatus !== 'completed' || resume.extractedProfile === null) return;
+    applied.current = true;
+    const ex = resume.extractedProfile;
+    if (touched.current) {
+      setAiDraft(ex);
+      setMessage('AI read your resume — apply its draft to fill empty fields?');
+    } else {
+      setD(prev => ({ ...prev, ...applyExtracted(prev, ex) }));
+      setMessage('AI read your resume — the form is filled in. Edit anything.');
+    }
+  }, [resume]);
 
   const patch = (p: Partial<WizDraft>) => { touched.current = true; setD(prev => ({ ...prev, ...p })); };
   const skills = d.skills;
@@ -146,7 +172,7 @@ export function Onboarding() {
       return;
     }
     patch({ resumeName: file.name });
-    setMessage(`"${file.name}" attached — the file stays on this device. AI resume drafting isn't wired into this build yet; fill the form yourself for now.`);
+    setMessage(await uploadResume(file));
   };
 
   return (
@@ -239,6 +265,14 @@ export function Onboarding() {
           {message !== '' ? (
             <p className="card-inner t-small" role="status" style={{ margin: 0, display: 'grid', gap: 8 }}>
               <span>{message}</span>
+              {aiDraft !== null ? (
+                <span>
+                  <button type="button" className="btn btn-ghost btn-sm"
+                    onClick={() => { setD(prev => ({ ...prev, ...applyExtracted(prev, aiDraft) })); setAiDraft(null); setMessage('AI draft applied to the empty fields.'); }}>
+                    Apply AI draft
+                  </button>
+                </span>
+              ) : null}
             </p>
           ) : null}
 
@@ -281,8 +315,20 @@ export function Onboarding() {
             </div>
             <div>
               <span className="lbl">Resume</span>
-              <Dropzone file={d.resumeName ? { name: d.resumeName } : null} busy={false}
+              <Dropzone file={d.resumeName ? { name: d.resumeName } : null} busy={false} ai={backend}
                 onFile={pickResume} onClear={() => patch({ resumeName: '' })} />
+              {resume !== null ? (
+                <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+                  {resume.extractionStatus === 'failed' ? (<>
+                    <Status kind="bad">Resume reading failed</Status>
+                    <p className="muted t-caption" style={{ margin: 0 }}>{resume.failureReason ?? 'Try a text-based PDF or DOCX export and re-upload.'}</p>
+                  </>) : resume.extractionStatus === 'completed' ? (
+                    <Status kind="ok">AI finished reading v{resume.version} of this resume</Status>
+                  ) : (
+                    <Status kind="info">Reading your resume: {stageLabel(resume.stage)}…</Status>
+                  )}
+                </div>
+              ) : null}
             </div>
           </>) : null}
 

@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { Application, AppStatus, DraftMail, HotReply, Job, LiveSearchState, OutreachMail, Profile, Route } from './types';
+import type { Application, AppStatus, DraftMail, HotReply, Job, LiveSearchState, OutreachMail, Profile, ResumeRecord, Route } from './types';
 import { applyColorway, DEFAULT_COLORWAY } from './theme/palettes';
 import { monoStack, sansStack } from './theme/typography';
 import { DemoApplicationService, nextId } from './services/demo';
@@ -11,6 +11,7 @@ import { backendOn, type Usage } from './services/api';
 import { authSignOut } from './lib/authClient';
 import { initialsFor } from './lib/profileSync';
 import { prepareAvatar, blobToDataUrl } from './lib/imageScale';
+import { resumeMimeForFile } from './lib/resume';
 import { useConvexAuth, useMutation, useQuery } from 'convex/react';
 import { api as convexApi } from '../convex/_generated/api';
 import type { Id } from '../convex/_generated/dataModel';
@@ -149,6 +150,9 @@ interface Store {
   scan: () => void; send: (m: DraftMail) => Promise<string>; clearSent: () => void; clearApps: () => void;
   clearNotif: () => void;
   setAvatarPhoto: (file: File) => Promise<string>;
+  /** Resume pipeline (SPEC §3): the active upload + its AI-read state. */
+  resume: ResumeRecord | null;
+  uploadResume: (file: File) => Promise<string>;
   liveSearch: LiveSearchState; runLiveSearch: (query: string, country: string) => Promise<void>;
   cancelLiveSearch: () => Promise<void>;
 }
@@ -242,6 +246,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const setLeadStatus = useMutation(convexApi.leads.updateStatus);
   const saveConvexProfile = useMutation(convexApi.profiles.save);
   const ensureUser = useMutation(convexApi.users.ensure);
+  const requestResumeUpload = useMutation(convexApi.resumes.requestUpload);
+  const attachResume = useMutation(convexApi.resumes.attach);
+  const serverResume = useQuery(convexApi.resumes.myCurrent, serverReady ? {} : 'skip');
+
+  // The active resume row (whitelisted server fields — never raw text).
+  const resume = useMemo<ResumeRecord | null>(() => {
+    if (serverResume === undefined || serverResume === null) return null;
+    const row = serverResume as unknown as ResumeRecord;
+    return {
+      resumeId: row.resumeId,
+      fileName: row.fileName,
+      mimeType: row.mimeType,
+      sizeBytes: row.sizeBytes,
+      version: row.version,
+      extractionStatus: row.extractionStatus,
+      stage: row.stage,
+      failureReason: row.failureReason,
+      extractedProfile: row.extractedProfile,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }, [serverResume]);
 
   useEffect(() => {
     const fn = () => setRoute(routeFromPath());
@@ -423,12 +449,45 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return 'Photo kept in this browser only — accounts are managed by Clerk.';
   };
 
+  /** Resume upload: the bytes go straight to Convex storage via a
+   *  short-lived upload URL, then the id is attached to the account. The
+   *  pipeline (extract → AI) runs server-side; the wizard watches the row
+   *  reactively, so no polling here. Returns honest user-facing copy. */
+  const uploadResume = async (file: File): Promise<string> => {
+    if (!useBackend) {
+      setProfile((prev) => ({ ...prev, resume: file.name }));
+      return 'Resume kept in this browser — no backend is configured, so nothing was uploaded.';
+    }
+    const mime = resumeMimeForFile(file);
+    if (mime === null) {
+      return 'That file is not a PDF or DOCX — export your resume in one of those formats and try again.';
+    }
+    try {
+      const { uploadUrl } = await requestResumeUpload();
+      const put = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': mime },
+        body: file,
+      });
+      if (!put.ok) return 'The upload did not complete — try again.';
+      const { storageId } = await put.json() as { storageId: string };
+      await attachResume({ storageId: storageId as Id<'_storage'>, fileName: file.name, mimeType: mime });
+      setProfile((prev) => ({ ...prev, resume: file.name }));
+      return 'Resume uploaded — Scout is reading it now.';
+    } catch (e) {
+      const { message } = cleanConvexError(e);
+      return message;
+    }
+  };
+
   const value = useMemo<Store>(() => ({
     route, authed, restoring, onboarded, dark, profile, jobs, apps, sent, notif, scanning, scannedAt, usage, backend: useBackend, search, selected, colorway,
     sidebarOpen, setSidebarOpen,
     hotReply, dismissHotReply,
     liveSearch, runLiveSearch, cancelLiveSearch,
     setAvatarPhoto,
+    resume,
+    uploadResume,
     go: (r) => { window.history.pushState({}, '', '/' + r); setRoute(r); setSelected(null); setSidebarOpen(false); window.scrollTo({ top: 0 }); },
     login: (email, opts) => {
       logger.info('auth-login', 'User logged in', { user_id: hashUserId(email) });
@@ -609,7 +668,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setColorway,
     setRestoring,
     setSignOutAction: (fn) => { signOutActionRef.current = fn; },
-  }), [route, authed, restoring, onboarded, dark, profile, jobs, apps, sent, notif, scanning, scannedAt, usage, search, selected, colorway, sidebarOpen, liveSearch, serverReady, serverLeads, serverProfileRow, serverUsage, dismissHotReply, createRun, cancelRun, setLeadStatus, saveConvexProfile, ensureUser, liveRunId]);
+  }), [route, authed, restoring, onboarded, dark, profile, jobs, apps, sent, notif, scanning, scannedAt, usage, search, selected, colorway, sidebarOpen, liveSearch, serverReady, serverLeads, serverProfileRow, serverUsage, dismissHotReply, createRun, cancelRun, setLeadStatus, saveConvexProfile, ensureUser, liveRunId, resume, requestResumeUpload, attachResume]);
 
   // Clerk sign-out handoff: the AuthBridge registers signOut() here once the
   // provider mounts; logout() delegates instead of poking Clerk directly.

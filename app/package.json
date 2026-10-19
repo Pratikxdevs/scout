@@ -7,7 +7,7 @@
     "dev": "vite --port 2992 --host 0.0.0.0",
     "build": "tsc --noEmit && vite build",
     "check": "tsc --noEmit",
-    "test": "node --test src/lib/*.test.ts src/debug/*.test.ts src/services/*.test.ts",
+    "test": "node --test src/lib/*.test.ts src/debug/*.test.ts src/services/*.test.ts convex/lib/*.test.ts",
     "preview": "vite preview --port 2992 --host 0.0.0.0"
   },
   "dependencies": {
@@ -18,7 +18,8 @@
     "better-auth": "^1.6.33",
     "convex": "^1.46.0",
     "react": "^19.0.1",
-    "react-dom": "^19.0.1"
+    "react-dom": "^19.0.1",
+    "unpdf": "^1.9.1"
   },
   "devDependencies": {
     "@sentry/vite-plugin": "^5.4.1",

@@ -41,6 +41,36 @@ export default defineSchema({
   }).index('by_user_id', ['userId']),
 
   /** One hunt. Lifecycle: queued → running → completed|failed|cancelled. */
+  /**
+   * Resume → AI profile draft (SPEC §3). One active row per account
+   * (isActive) — a new upload supersedes the old version and its bytes are
+   * deleted. The AI draft fills only EMPTY profile fields.
+   */
+  resumes: defineTable({
+    userId: v.string(),             // Clerk subject
+    storageId: v.id('_storage'),    // the uploaded bytes (private)
+    fileName: v.string(),
+    mimeType: v.string(),           // PDF_MIME | DOCX_MIME
+    sizeBytes: v.number(),
+    version: v.number(),
+    extractedText: v.optional(v.string()),
+    extractedTextStorageId: v.optional(v.id('_storage')),
+    extractedProfile: v.optional(v.any()),   // sanitized AI draft
+    extractionStatus: v.union(
+      v.literal('pending'), v.literal('processing'),
+      v.literal('completed'), v.literal('failed'),
+    ),
+    stage: v.optional(v.string()),  // reading | ai_queued | ai_wait | ai_running | ready | failed
+    failureReason: v.optional(v.string()),
+    aiAttempts: v.optional(v.number()),
+    appliedAt: v.optional(v.number()),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_user_id', ['userId'])
+    .index('by_user_id_and_is_active', ['userId', 'isActive']),
+
   searchRuns: defineTable({
     userId: v.string(),
     query: v.string(),              // free-text the user asked
