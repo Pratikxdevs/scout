@@ -1,7 +1,7 @@
 "use node";
 import { internalAction } from '../_generated/server';
 import { v } from 'convex/values';
-import { api, internal } from '../_generated/api';
+import { internal } from '../_generated/api';
 import { canonicalUrl } from '../lib/urls';
 import { LIMITS } from '../lib/limits';
 import { searchWeb, toProviderError } from '../providers/tinyfish';
@@ -10,13 +10,13 @@ import { searchWeb, toProviderError } from '../providers/tinyfish';
 export const startSearch = internalAction({
   args: { runId: v.id('searchRuns') },
   handler: async (ctx, args) => {
-    const run = await ctx.runQuery(api.searchRuns.get, { runId: args.runId });
+    const run = await ctx.runQuery(internal.searchRuns.getInternal, { runId: args.runId });
     if (run === null) return;               // gone
     if (run.status !== 'queued') return;    // cancelled while queued
 
     await ctx.runMutation(internal.searchRuns.setRunning, { runId: args.runId });
 
-    const profile = await ctx.runQuery(api.profiles.getMine, {}) as
+    const profile = await ctx.runQuery(internal.profiles.rowFor, { userId: run.userId }) as
       { services?: string[]; industries?: string[]; keywords?: string[] } | null;
     const plan = planQueries(run.query, profile);
     await ctx.runMutation(internal.searchRuns.setPlanned, { runId: args.runId, plannedQueries: plan });

@@ -1,4 +1,4 @@
-import { mutation, query } from './_generated/server';
+import { mutation, internalQuery, query } from './_generated/server';
 import { v } from 'convex/values';
 import { requireActor } from './lib/actor';
 import { fail } from './lib/errors';
@@ -102,4 +102,15 @@ export const getMine = query({
       .withIndex('by_user_id', (q) => q.eq('userId', actor.userId))
       .first();
   },
+});
+
+/** Internal read for scheduled actions: profile of ONE user. Callers pass a
+ *  userId that came from an owner-checked row (runs carry their owner). */
+export const rowFor = internalQuery({
+  args: { userId: v.string() },
+  handler: async (ctx, args) =>
+    ctx.db
+      .query('profiles')
+      .withIndex('by_user_id', (q) => q.eq('userId', args.userId))
+      .first(),
 });

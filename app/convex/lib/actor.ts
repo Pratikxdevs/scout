@@ -1,4 +1,4 @@
-import type { MutationCtx, QueryCtx } from '../_generated/server';
+import type { MutationCtx, QueryCtx, ActionCtx } from '../_generated/server';
 import { fail } from './errors';
 
 /**
@@ -13,7 +13,8 @@ export interface Actor {
 
 export async function requireActor(ctx: QueryCtx): Promise<Actor>;
 export async function requireActor(ctx: MutationCtx): Promise<Actor>;
-export async function requireActor(ctx: QueryCtx | MutationCtx): Promise<Actor> {
+export async function requireActor(ctx: ActionCtx): Promise<Actor>;
+export async function requireActor(ctx: QueryCtx | MutationCtx | ActionCtx): Promise<Actor> {
   const identity = await ctx.auth.getUserIdentity();
   if (identity === null) {
     throw fail('UNAUTHENTICATED', 'Sign in to use Scout.');

@@ -1,4 +1,4 @@
-import { mutation, query, internalMutation } from './_generated/server';
+import { mutation, query, internalMutation, internalQuery } from './_generated/server';
 import { internal } from './_generated/api';
 import { v } from 'convex/values';
 import { requireActor, assertOwned } from './lib/actor';
@@ -56,6 +56,13 @@ export const get = query({
     assertOwned(run, actor.userId);
     return run;
   },
+});
+
+/** Internal read for scheduled actions (no identity) — callers own-scope
+ *  by passing the run's userId onward from the row itself. */
+export const getInternal = internalQuery({
+  args: { runId: v.id('searchRuns') },
+  handler: async (ctx, args) => ctx.db.get(args.runId),
 });
 
 /** Public read: my recent runs, newest first. */

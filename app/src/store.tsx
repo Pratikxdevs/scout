@@ -241,6 +241,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const cancelRun = useMutation(convexApi.searchRuns.cancel);
   const setLeadStatus = useMutation(convexApi.leads.updateStatus);
   const saveConvexProfile = useMutation(convexApi.profiles.save);
+  const ensureUser = useMutation(convexApi.users.ensure);
 
   useEffect(() => {
     const fn = () => setRoute(routeFromPath());
@@ -435,6 +436,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // Clerk owns identity; data flows in reactively once authed flips.
       setProfile(p => ({ ...p, email }));
       setAuthed(true);
+      // Users row = presence + lastSeen (advisory; requireActor never blocks).
+      if (useBackend) {
+        void ensureUser().catch((e: unknown) => logger.warn('users-ensure', e instanceof Error ? e.message : '', {}));
+      }
       if (opts?.silent !== true) {
         const next: Route = onboarded ? 'dashboard' : 'onboarding';
         window.history.pushState({}, '', '/' + next); setRoute(next);
@@ -604,7 +609,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setColorway,
     setRestoring,
     setSignOutAction: (fn) => { signOutActionRef.current = fn; },
-  }), [route, authed, restoring, onboarded, dark, profile, jobs, apps, sent, notif, scanning, scannedAt, usage, search, selected, colorway, sidebarOpen, liveSearch, serverReady, serverLeads, serverProfileRow, serverUsage, dismissHotReply, createRun, cancelRun, setLeadStatus, saveConvexProfile, liveRunId]);
+  }), [route, authed, restoring, onboarded, dark, profile, jobs, apps, sent, notif, scanning, scannedAt, usage, search, selected, colorway, sidebarOpen, liveSearch, serverReady, serverLeads, serverProfileRow, serverUsage, dismissHotReply, createRun, cancelRun, setLeadStatus, saveConvexProfile, ensureUser, liveRunId]);
 
   // Clerk sign-out handoff: the AuthBridge registers signOut() here once the
   // provider mounts; logout() delegates instead of poking Clerk directly.

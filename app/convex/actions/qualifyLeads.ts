@@ -2,7 +2,7 @@
 import type { ActionCtx } from '../_generated/server';
 import { internalAction } from '../_generated/server';
 import { v } from 'convex/values';
-import { internal, api } from '../_generated/api';
+import { internal } from '../_generated/api';
 import type { Id } from '../_generated/dataModel';
 import { LIMITS } from '../lib/limits';
 import { excerptSupported, scoreLead, skillMatchRatio } from '../lib/scoring';
@@ -33,7 +33,7 @@ interface Extracted {
 export const qualifyRun = internalAction({
   args: { runId: v.id('searchRuns') },
   handler: async (ctx, args) => {
-    const run = await ctx.runQuery(api.searchRuns.get, { runId: args.runId });
+    const run = await ctx.runQuery(internal.searchRuns.getInternal, { runId: args.runId });
     if (run === null) return;
     if (run.status === 'cancelled' || run.status === 'failed') return;
 
@@ -61,7 +61,7 @@ export const qualifyRun = internalAction({
       return;
     }
 
-    const profile = await ctx.runQuery(api.profiles.getMine, {}) as {
+    const profile = await ctx.runQuery(internal.profiles.rowFor, { userId: run.userId }) as {
       services?: string[]; skills?: string[]; industries?: string[];
       minBudget?: number | null; maxBudget?: number | null;
     } | null;

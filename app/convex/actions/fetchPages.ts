@@ -1,7 +1,7 @@
 "use node";
 import { internalAction } from '../_generated/server';
 import { v } from 'convex/values';
-import { api, internal } from '../_generated/api';
+import { internal } from '../_generated/api';
 import type { Id } from '../_generated/dataModel';
 import { LIMITS } from '../lib/limits';
 import { isAllowedFetchable, canonicalUrl } from '../lib/urls';
@@ -15,7 +15,7 @@ export const processFetchBatches = internalAction({
   args: { runId: v.id('searchRuns') },
   handler: async (ctx, args) => {
     type Claimed = { _id: Id<'searchTasks'>; payload: { url: string } };
-    const run = await ctx.runQuery(api.searchRuns.get, { runId: args.runId });
+    const run = await ctx.runQuery(internal.searchRuns.getInternal, { runId: args.runId });
     if (run === null) return;                      // vanished
     if (run.status !== 'running' && run.status !== 'queued') return;
 
@@ -24,7 +24,7 @@ export const processFetchBatches = internalAction({
     const failures: string[] = [];
 
     for (let batchNo = 0; batchNo < LIMITS.SEARCH.MAX_BATCHES_PER_RUN; batchNo++) {
-      const still = await ctx.runQuery(api.searchRuns.get, { runId: args.runId });
+      const still = await ctx.runQuery(internal.searchRuns.getInternal, { runId: args.runId });
       if (still === null || still.status === 'cancelled') return;
 
       const claimed = (await ctx.runMutation(internal.searchTasks.claimFetch, {
