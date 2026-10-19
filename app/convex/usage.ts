@@ -17,6 +17,7 @@ export const summary = query({
     let pipelineTotal = 0;
     let topScore: number | null = null;
     let leadsSavedToday = 0;
+    let contactedToday = 0;
 
     const leads = await ctx.db
       .query('leads')
@@ -27,6 +28,7 @@ export const summary = query({
       if (l.crmStatus !== 'dismissed') pipelineTotal++;
       topScore = topScore === null ? l.scoreOverall : Math.max(topScore, l.scoreOverall);
       if (l.lastVerifiedAt >= since) leadsSavedToday++;
+      if (l.crmStatus === 'contacted' && l.updatedAt >= since) contactedToday++;
     }
 
     const hunts = await ctx.db
@@ -44,6 +46,8 @@ export const summary = query({
 
     return {
       leadsSavedToday,
+      contactedToday,
+      contactCap: CONTACT_CAP,
       pipelineTotal,
       pipelineByStatus,
       topScore,
@@ -54,6 +58,9 @@ export const summary = query({
   },
 });
 
+const CONTACT_CAP = LIMITS.PIPELINE.CONTACT_CAP;
+
+/** UTC midnight of today (server clock). */
 function startOfToday(): number {
   const d = new Date();
   d.setUTCHours(0, 0, 0, 0);

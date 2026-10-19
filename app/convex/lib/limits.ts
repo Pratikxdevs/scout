@@ -23,6 +23,10 @@ export const LIMITS = {
     MIN_USEFUL_TEXT: 200,
   },
   AGENT: { MAX_PER_RUN: 2, MAX_PROCESS_SECONDS: 120 },
+  PIPELINE: {
+    /** Leads you may move to `contacted` per UTC day (caps meter truth). */
+    CONTACT_CAP: 25,
+  },
   SWEEP: {
     /** Lease window before a stale task may be reclaimed. */
     LEASE_MS: 5 * 60 * 1000,

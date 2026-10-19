@@ -8,7 +8,6 @@ import { LIMITS } from '../lib/limits';
 import { excerptSupported, scoreLead, skillMatchRatio } from '../lib/scoring';
 import { completeJson, LlmError, llmKey } from '../providers/llm';
 import { extractLeadSystem, extractLeadUser } from '../lib/prompt';
-import { domainClass } from '../lib/urls';
 
 const u = (x: unknown, max: number): string => (typeof x === 'string' ? x.replace(/\s+/g, ' ').trim().slice(0, max) : '');
 
@@ -204,14 +203,8 @@ function toDate(s: string | undefined): number | null {
 
 function hostname(url: string): string {
   try {
-    const u2 = new URL(url);
-    void u2;
     return url.replace(/^https?:\/\//, '').split('/')[0].replace(/^www\./, '');
   } catch {
-    return domainClassSafeName(url);
+    return '';
   }
-}
-
-function domainClassSafeName(url: string): string {
-  try { return new URL(url).hostname; } catch { return ''; }
 }

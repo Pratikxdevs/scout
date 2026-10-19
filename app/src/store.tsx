@@ -1,28 +1,38 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { Application, AppStatus, DraftMail, HotReply, Job, LiveSearchState, OutreachMail, Profile, ProfileDossier, Reply, ResumeRecord, Route } from './types';
+import type { Application, AppStatus, DraftMail, HotReply, Job, LiveSearchState, OutreachMail, Profile, Route } from './types';
 import { applyColorway, DEFAULT_COLORWAY } from './theme/palettes';
 import { monoStack, sansStack } from './theme/typography';
-import { DemoApplicationService, DemoOutreachService, DemoProfileEnrichmentService, DemoResumeService, nextId } from './services/demo';
+import { DemoApplicationService, nextId } from './services/demo';
 import { loadLegacy, loadStored, saveStored } from './lib/storage';
 import { validJobs } from './lib/validate';
 import { setSentryUser, hashUserId } from './lib/sentry';
-import { currentRequestId, logger } from './lib/logger';
-import { backendOn, fetchUsage, apiFetch, toUserMessage, type Usage } from './services/api';
+import { logger } from './lib/logger';
+import { backendOn, type Usage } from './services/api';
 import { authSignOut } from './lib/authClient';
-import { initialsFor, mergeServerProfile, profilePatch } from './lib/profileSync';
+import { initialsFor } from './lib/profileSync';
 import { prepareAvatar, blobToDataUrl } from './lib/imageScale';
-import { HttpApplicationService, HttpAvatarService, HttpJobService, HttpOutreachService, HttpProfileEnrichmentService, HttpResumeService } from './services/http';
-import { dossierIsActive } from './lib/profileDossier';
+import { useConvexAuth, useMutation, useQuery } from 'convex/react';
+import { api as convexApi } from '../convex/_generated/api';
+import type { Id } from '../convex/_generated/dataModel';
 
-/* Backend wiring (04-04): stateless HTTP services behind the same
- * DemoXService interfaces. useBackend is read once — demo checkouts never
- * import a fetch path. Job rows hydrate via httpJobs.refresh(). */
-const httpApp = new HttpApplicationService();
-const httpOut = new HttpOutreachService();
-const httpJobs = new HttpJobService();
-const httpResume = new HttpResumeService();
-const httpEnrich = new HttpProfileEnrichmentService();
-const httpAvatar = new HttpAvatarService();
+/* Backend wiring (wave 13): Convex IS the backend. `backendOn` is true when
+ * VITE_CONVEX_URL is configured; identity comes from Clerk (AuthBridge),
+ * server rows stream in via reactive useQuery hooks below — no fetch
+ * layer, no hydration waterfall. Demo mode (no Convex URL) keeps the local
+ * DemoXService paths. */
+
+/** Structural view of a leads row (typed by Convex; listed for mapping). */
+interface LeadRow {
+  _id: Id<'leads'>; userId: string; runId?: Id<'searchRuns'>;
+  canonicalUrl: string; domain: string; title: string; company: string;
+  description?: string; location?: string;
+  budgetVerified?: boolean; budgetMin?: number; budgetMax?: number; budgetNote?: string;
+  publishedAt?: number; opportunityType?: string; intent?: string;
+  scoreOverall: number; scoreExplanation?: string; scoreSkill?: number;
+  crmStatus: 'new' | 'saved' | 'contacted' | 'replied' | 'won' | 'lost' | 'dismissed';
+  claims?: never[]; lastVerifiedAt: number; updatedAt: number;
+}
+
 const useBackend = backendOn();
 
 const KEYS = {
@@ -38,10 +48,90 @@ const today = () => new Date().toLocaleDateString('en-US', { month: '2-digit', d
 export const todayStr = today;
 const clock = () => new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) + ' UTC';
 
+/** Format a server timestamp as the UI's MM/DD/YY day key (or ''). */
+function fmtDay(ts: number | undefined): string {
+  if (typeof ts !== 'number' || !Number.isFinite(ts)) return '';
+  return new Date(ts).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
+}
+
+/** CRM status → the closest pipeline stage label the UI owns. */
+function crmToAppStatus(crm: LeadRow['crmStatus'] | undefined): Application['status'] | null {
+  switch (crm) {
+    case 'saved': case 'contacted': return 'UNDER REVIEW';
+    case 'replied': return 'INTERVIEW SET';
+    case 'won': return 'OFFERED';
+    case 'lost': return 'REJECTED';
+    case 'dismissed': return 'WITHDRAWN';
+    default: return null;   // new — not in the pipeline yet
+  }
+}
+
+/** App-status → CRM write for "advance" (saved rows promote to contacted). */
+function nextCrm(
+  cur: Application,
+): 'contacted' | 'replied' | 'won' | null {
+  switch (cur.status) {
+    case 'UNDER REVIEW': return cur.crm === 'saved' ? 'contacted' : 'replied';
+    case 'INTERVIEW SET': return 'won';
+    default: return null;
+  }
+}
+
+/** leads row → the feed's Job shape (scores feed `match`; no invented data). */
+function leadToJob(r: LeadRow): Job {
+  let compensation = '';
+  if (r.budgetVerified === true) {
+    const lo = r.budgetMin ?? r.budgetMax;
+    const hi = r.budgetMax ?? r.budgetMin;
+    if (lo !== undefined || hi !== undefined) compensation = `$${lo ?? '?'} – $${hi ?? '?'}`;
+  }
+  return {
+    id: 'lead:' + r._id,
+    leadId: r._id,
+    title: r.title,
+    company: r.company,
+    location: r.location !== undefined && r.location !== '' ? r.location : '—',
+    compensation,
+    description: r.description !== undefined && r.description !== '' ? r.description : r.scoreExplanation ?? '',
+    requirements: [],
+    match: r.scoreOverall,
+    isSaved: r.crmStatus !== 'new',
+    savedAt: fmtDay(r.updatedAt),
+    url: r.canonicalUrl,
+    posted: r.publishedAt !== undefined ? fmtDay(r.publishedAt) : '',
+    type: r.opportunityType === 'one_off' || r.opportunityType === 'short_term' ? 'Contract' : 'Full-time',
+  };
+}
+
+function leadToApp(r: LeadRow): Application | null {
+  const status = crmToAppStatus(r.crmStatus);
+  if (status === null) return null;
+  return {
+    id: 'app:' + r._id,
+    jobId: 'lead:' + r._id,
+    title: r.title,
+    company: r.company,
+    appliedDate: fmtDay(r.updatedAt) || today(),
+    updatedAt: fmtDay(r.updatedAt),
+    status,
+    serverId: r._id,
+    crm: r.crmStatus === 'saved' ? 'saved' : 'contacted',
+  };
+}
+
+/** Convex throws wedge-shaped messages; peel the Scout code+copy out. */
+function cleanConvexError(err: unknown): { code?: string; message: string } {
+  const raw = err instanceof Error ? err.message : String(err);
+  const m = /Error: ([A-Z_]+): ([^]*?)(?:\(?\s*at [a-zA-Z]|$)/.exec(raw) ?? /Error: ([A-Z_]+): ([^]+)/.exec(raw);
+  if (m !== null) return { code: m[1], message: m[2].trim() };
+  const plain = raw.replace(/^Uncaught Error: /, '').replace(/\(\[CONVEX[^)]*\)\] */, '').trim();
+  return { message: plain === '' ? 'Something went wrong — try again.' : plain };
+}
+
 interface Store {
   route: Route; authed: boolean; onboarded: boolean; dark: boolean;
   profile: Profile; jobs: Job[]; apps: Application[];
-  sent: OutreachMail[]; replies: Reply[]; notif: number; scanning: boolean;
+  sent: OutreachMail[]; notif: number; scanning: boolean;
   scannedAt: number | null; usage: Usage | null;
   backend: boolean; restoring: boolean;
   sidebarOpen: boolean; setSidebarOpen: (v: boolean) => void;
@@ -58,10 +148,6 @@ interface Store {
   archiveApp: (id: string, archived: boolean) => Promise<void>;
   scan: () => void; send: (m: DraftMail) => Promise<string>; clearSent: () => void; clearApps: () => void;
   clearNotif: () => void;
-  resume: ResumeRecord | null; uploadResume: (file: File) => Promise<string>;
-  enrichment: ProfileDossier | null; enrichBusy: boolean;
-  startEnrichment: () => Promise<string>; refreshEnrichment: () => Promise<void>;
-  pasteEnrichmentSource: (sourceId: string, text: string) => Promise<string>;
   setAvatarPhoto: (file: File) => Promise<string>;
   liveSearch: LiveSearchState; runLiveSearch: (query: string, country: string) => Promise<void>;
   cancelLiveSearch: () => Promise<void>;
@@ -121,13 +207,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
   });
   const [jobs, setJobs] = useState<Job[]>(() => {
-    // Live source only: persisted cache or empty. Seed bundles are gone —
-    // backend hydrate fills this on login (W1); no reseed, ever.
+    // Demo-local feed only; the backend feed streams via the leads hook.
     return validJobs(load<Job[]>(KEYS.jobs, []));
   });
   const [apps, setApps] = useState<Application[]>(() => load(KEYS.apps, [] as Application[]));
   const [sent, setSent] = useState<OutreachMail[]>(() => load(KEYS.sent, [] as OutreachMail[]));
-  const [replies, setReplies] = useState<Reply[]>([]);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [notif, setNotif] = useState(0);
   const [hotReply, setHotReply] = useState<HotReply | null>(null);
@@ -138,19 +222,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [colorway, setColorway] = useState(() => load(KEYS.colorway, DEFAULT_COLORWAY));
   // Mobile drawer (opened from the topbar burger).
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  // Backend scrape-run progress (session-only: never persisted).
+  // Backend hunt progress (session-only: never persisted).
   const [liveSearch, setLiveSearch] = useState<LiveSearchState>({ state: 'idle', message: '' });
-  // Active backend search id for Cancel (ref: only read in click handlers).
-  const liveSearchId = useRef<string | null>(null);
-  // Active resume row (server pipeline state) — session-only, re-fetched on login.
-  const [resume, setResume] = useState<ResumeRecord | null>(null);
-  // Profile enrichment run (public links → AI dossier) — session-only.
-  const [enrichment, setEnrichment] = useState<ProfileDossier | null>(null);
-  const [enrichBusy, setEnrichBusy] = useState(false);
-  const enrichPolling = useRef(false);
-  // Bumped when the active account/resume changes so an in-flight poll can
-  // never repopulate the previous account's dossier after logout.
-  const enrichPollToken = useRef(0);
+  // The queued hunt this client started; the run hook streams its state.
+  const [liveRunId, setLiveRunId] = useState<Id<'searchRuns'> | null>(null);
+
+  /* ---------- Convex hooks (reactive, identity comes from Clerk) ---------- */
+  const { isAuthenticated } = useConvexAuth();
+  const serverReady = useBackend && authed && isAuthenticated;
+  const serverProfileRow = useQuery(convexApi.profiles.getMine, serverReady ? {} : 'skip');
+  const serverLeads = useQuery(convexApi.leads.listMine, serverReady ? { limit: 80 } : 'skip');
+  const serverUsage = useQuery(convexApi.usage.summary, serverReady ? {} : 'skip');
+  const activeRun = useQuery(
+    convexApi.searchRuns.get,
+    serverReady && liveRunId !== null ? { runId: liveRunId } : 'skip',
+  );
+  const createRun = useMutation(convexApi.searchRuns.create);
+  const cancelRun = useMutation(convexApi.searchRuns.cancel);
+  const setLeadStatus = useMutation(convexApi.leads.updateStatus);
+  const saveConvexProfile = useMutation(convexApi.profiles.save);
 
   useEffect(() => {
     const fn = () => setRoute(routeFromPath());
@@ -169,363 +259,203 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     root.setProperty('--font-mono', monoStack());
     applyColorway(colorway, dark);
   }, [colorway, dark]);
-  // Palette overlay is gone (search icon navigates to the hero page);
-  // no global keyboard shortcut remains.
-  /** Pull the server profile row into local state. Returns the server's
-   *  onboardingCompleted — true/false from the row, null in demo mode or
-   *  when the server is unreachable — so callers can route on server truth.
-   *  Best-effort: failures keep local state and only log. */
-  const syncProfile = async (): Promise<boolean | null> => {
-    if (!useBackend) return null;
-    const token = enrichPollToken.current;
-    try {
-      const server = await apiFetch<unknown>('/profiles/me');
-      if (token !== enrichPollToken.current) return null; // account changed mid-read
-      const fromServer = mergeServerProfile(server);
-      setProfile(prev => {
-        const merged = { ...prev, ...fromServer };
-        if (fromServer.name !== undefined) merged.initials = initialsFor(merged.name, prev.initials);
-        return merged;
-      });
-      const rec = server as { onboardingCompleted?: unknown };
-      if (rec.onboardingCompleted === true) setOnboarded(true);
-      if (rec.onboardingCompleted === true) return true;
-      if (rec.onboardingCompleted === false) return false;
-      return null;
-    } catch {
-      logger.warn('hydrate-profile', 'Server profile unreachable — showing local.', {});
-      return null;
-    }
-  };
 
-  /** Poll the enrichment dossier to a terminal state, then re-pull the
-   *  profile so AI-merged fields land across the app. Bounded and
-   *  single-flight; a reload can restart it from the active server row. */
-  const pollEnrichment = async (): Promise<void> => {
-    if (!useBackend || enrichPolling.current) return;
-    enrichPolling.current = true;
-    const token = enrichPollToken.current;
-    // The AI action can wait up to 20 × 30s for provider capacity, so keep
-    // polling past the usual ~1 minute rather than stranding a live row.
-    const deadline = Date.now() + 12 * 60_000;
-    try {
-      for (;;) {
-        await new Promise<void>((resolve) => {
-          window.setTimeout(resolve, 1500);
-        });
-        if (token !== enrichPollToken.current) return;
-        let next: ProfileDossier | null = null;
-        try {
-          next = await httpEnrich.latest();
-        } catch {
-          return; // transient transport failure — the last state stays
-        }
-        if (token !== enrichPollToken.current) return;
-        if (next === null) {
-          // Another tab/resume replacement removed the active run.
-          setEnrichment(null);
-          return;
-        }
-        setEnrichment(next);
-        if (next.status === 'ready') {
-          void syncProfile();
-          setNotif((n) => n + 1);
-          return;
-        }
-        if (next.status === 'failed') {
-          setNotif((n) => n + 1);
-          return;
-        }
-        if (Date.now() > deadline) return;
-      }
-    } finally {
-      // A newer account/resume may already own the polling flag.
-      if (token === enrichPollToken.current) enrichPolling.current = false;
-    }
-  };
+  /* ---------- server rows → store state (reactive, no polling) ---------- */
 
-  /** Re-read the latest dossier (used on mount and after login). */
-  const refreshEnrichment = async (): Promise<void> => {
-    if (!useBackend) return;
-    const token = enrichPollToken.current;
-    try {
-      const row = await httpEnrich.latest();
-      if (token !== enrichPollToken.current) return; // account/resume changed
-      setEnrichment(row);
-      if (row !== null && dossierIsActive(row.status)) void pollEnrichment();
-    } catch {
-      logger.warn('hydrate-enrichment', 'Enrichment status unreachable — showing none.', {});
-    }
-  };
+  // Profile hydration: only meaningful server values merge; local wins for
+  // untouched fields. onboardingCompleted restores the wizard skip.
+  useEffect(() => {
+    if (!serverReady || serverProfileRow === undefined || serverProfileRow === null) return;
+    const row = serverProfileRow;
+    setProfile(prev => ({
+      ...prev,
+      name: row.name !== '' ? row.name : prev.name,
+      email: row.email !== '' ? row.email : prev.email,
+      city: row.city ?? prev.city,
+      country: row.country ?? prev.country,
+      summary: row.summary ?? prev.summary,
+      services: Array.isArray(row.services) && row.services.length > 0 ? row.services : prev.services,
+      industries: Array.isArray(row.industries) && row.industries.length > 0 ? row.industries : prev.industries,
+      keywords: Array.isArray(row.keywords) && row.keywords.length > 0 ? row.keywords : prev.keywords,
+      minBudget: row.minBudget ?? prev.minBudget,
+      maxBudget: row.maxBudget ?? prev.maxBudget,
+      skills: Array.isArray(row.skills) && row.skills.length > 0 ? row.skills.join(', ') : prev.skills,
+      initials: row.name !== '' ? initialsFor(row.name, prev.initials) : prev.initials,
+    }));
+    if (row.onboardingCompleted === true) setOnboarded(true);
+  }, [serverProfileRow, serverReady]);
 
-  /** Explicit user action. Returns honest copy in both modes; demo never
-   *  pretends a public profile was fetched. */
-  const startEnrichment = async (): Promise<string> => {
-    if (!useBackend) {
-      return (await DemoProfileEnrichmentService.start()).message;
-    }
-    if (resume === null || resume.extractionStatus !== 'completed') {
-      return 'Upload your resume and wait for AI reading to finish first.';
-    }
-    const token = enrichPollToken.current;
-    setEnrichBusy(true);
-    try {
-      const { dossier, message } = await httpEnrich.start();
-      if (token !== enrichPollToken.current) return message;
-      if (dossier !== null) {
-        setEnrichment(dossier);
-        if (dossierIsActive(dossier.status)) void pollEnrichment();
-      } else {
-        void refreshEnrichment();
-      }
-      return message;
-    } finally {
-      setEnrichBusy(false);
-    }
-  };
+  // Leads → feed + pipeline. The server list is authoritative once loaded;
+  // saved-status rows never lose their flags (crmStatus is the truth).
+  useEffect(() => {
+    if (!serverReady || serverLeads === undefined) return;
+    const rows = (serverLeads as unknown as LeadRow[]) ?? [];
+    setJobs(rows.map(leadToJob));
+    setApps(rows.map(leadToApp).filter((a): a is Application => a !== null));
+  }, [serverLeads, serverReady]);
 
-  /** Attach manually pasted text to one blocked source, then re-run AI. */
-  const pasteEnrichmentSource = async (sourceId: string, text: string): Promise<string> => {
-    if (!useBackend) {
-      return (await DemoProfileEnrichmentService.paste(sourceId, text)).message;
-    }
-    const token = enrichPollToken.current;
-    setEnrichBusy(true);
-    try {
-      const { dossier, message } = await httpEnrich.paste(sourceId, text);
-      if (token !== enrichPollToken.current) return message;
-      if (dossier !== null) {
-        setEnrichment(dossier);
-        if (dossierIsActive(dossier.status)) void pollEnrichment();
-      } else {
-        void refreshEnrichment();
-      }
-      return message;
-    } finally {
-      setEnrichBusy(false);
-    }
-  };
-
-  /** Pull server truth after auth (apps, sends, replies, caps). Best-effort:
-   *  failures keep local state and log — the app stays usable offline. */
-  const hydrateBackend = () => {
-    if (!useBackend) return;
-    void httpApp
-      .listRemote()
-      .then((rows) =>
-        setApps((prev) => {
-          const seen = new Set(prev.map((a) => a.id));
-          return [...rows.filter((r) => !seen.has(r.id)), ...prev];
-        }),
-      )
-      .catch(() => logger.warn('hydrate-apps', 'Server apps unreachable — showing local.', {}));
-    void httpOut
-      .listRemote()
-      .then((rows) =>
-        setSent((prev) => {
-          const seen = new Set(prev.map((m) => m.id));
-          return [...rows.filter((r) => !seen.has(r.id)), ...prev];
-        }),
-      )
-      .catch(() => logger.warn('hydrate-sends', 'Server sends unreachable — showing local.', {}));
-    void httpOut
-      .repliesRemote()
-      .then((rows) => {
-        if (rows.length > 0) setReplies(rows);
-      })
-      .catch(() => logger.warn('hydrate-replies', 'Server replies unreachable — showing local.', {}));
-    void httpOut
-      .notificationsRemote()
-      .then((rows) => setHotReply(rows[0] ?? null))
-      .catch(() => logger.warn('hydrate-notifications', 'Reply notifications unreachable — no banner.', {}));
-    void fetchUsage().then((u) => {
-      if (u !== null) setUsage(u);
+  // Caps meter truth: contacts today vs the CONTACT_CAP (LIMITS).
+  useEffect(() => {
+    if (!serverReady) return;
+    if (serverUsage === undefined || serverUsage === null) return;
+    setUsage({
+      applyUsed: serverUsage.contactedToday,
+      applyCap: serverUsage.contactCap,
+      outreachUsed: 0,
+      outreachCap: serverUsage.contactCap,
+      dateKey: today(),
     });
-    void httpResume
-      .latest()
-      .then((row) => {
-        if (row !== null) setResume(row);
-      })
-      .catch(() => logger.warn('hydrate-resume', 'Resume status unreachable — showing none.', {}));
-    void refreshEnrichment();
-    void httpJobs.refresh().then(() => setJobs([...httpJobs.all()])).catch(() => logger.warn('hydrate-jobs', 'Saved-jobs refresh failed — showing local.', {}));
-    // Server profile → local. Only meaningful server values merge; local
-    // wins when the row is empty. onboardingCompleted restores too, so a
-    // fresh device skips a finished wizard. (Callers sync before flipping
-    // `authed`; no duplicate pull here.)
-  };
+  }, [serverUsage, serverReady]);
 
-  /** Poll the resume pipeline to a terminal state, then pull the server
-   *  profile so AI-merged fields (experience/education/links…) land across
-   *  the app. Bounded — the wizard can always re-check on next open. */
-  const pollResume = async (): Promise<void> => {
-    const deadline = Date.now() + 150_000;
-    for (;;) {
-      await new Promise<void>((resolve) => {
-        window.setTimeout(resolve, 1500);
-      });
-      if (Date.now() > deadline) return;
-      let next: ResumeRecord | null = null;
-      try {
-        next = await httpResume.latest();
-      } catch {
-        return; // transient transport failure — last known state stays
+  // Hunt progress: stream the active run to the live-search banner.
+  useEffect(() => {
+    if (liveRunId === null) return;
+    if (activeRun === undefined) return;   // still loading
+    if (activeRun === null) { setLiveRunId(null); setScanning(false); return; }
+    switch (activeRun.status) {
+      case 'queued':
+        setScanning(true);
+        setLiveSearch({ state: 'running', message: 'Hunt queued — planning queries…' });
+        break;
+      case 'running':
+        setScanning(true);
+        setLiveSearch({ state: 'running', message: 'Hunting: search → fetch → score…' });
+        break;
+      case 'completed': {
+        setScanning(false);
+        setLiveRunId(null);
+        setScannedAt(Date.now());
+        setNotif(n => n + 1);
+        // The hunt consumed the hero query; clear it so the substring
+        // filter doesn't hide the fresh rows. Server order wins the feed.
+        setSearch('');
+        setLiveSearch({
+          state: 'idle',
+          message: `Hunt loaded ${activeRun.resultCount} lead${activeRun.resultCount === 1 ? '' : 's'}.`,
+        });
+        break;
       }
-      if (next === null) return;
-      setResume(next);
-      if (next.extractionStatus === 'completed' || next.extractionStatus === 'failed') {
-        void syncProfile();
-        setNotif((n) => n + 1);
-        return;
-      }
+      case 'failed':
+        setScanning(false);
+        setLiveRunId(null);
+        setLiveSearch({ state: 'error', message: activeRun.failReason ?? 'Hunt failed.', code: activeRun.failCode });
+        break;
+      case 'cancelled':
+        setScanning(false);
+        setLiveRunId(null);
+        setLiveSearch({ state: 'idle', message: 'Hunt cancelled.' });
+        break;
     }
+  }, [activeRun, liveRunId]);
+
+  /* ---------- honest profile sync to Convex (best-effort) ---------- */
+
+  const syncProfileToServer = (next: Profile, onboardingCompleted: boolean): void => {
+    if (!serverReady) return;
+    if (next.name.trim() === '' || !next.email.includes('@')) return; // row validity guard
+    void saveConvexProfile({
+      name: next.name,
+      email: next.email,
+      city: next.city !== '' ? next.city : undefined,
+      country: next.country !== '' ? next.country : undefined,
+      summary: next.summary !== '' ? next.summary : undefined,
+      services: next.services ?? [],
+      skills: next.skills.split(',').map(s => s.trim()).filter(Boolean),
+      industries: next.industries ?? [],
+      keywords: next.keywords ?? [],
+      minBudget: next.minBudget ?? undefined,
+      maxBudget: next.maxBudget ?? undefined,
+      onboardingCompleted,
+    }).catch((e: unknown) => {
+      logger.warn('profile-sync', cleanConvexError(e).message, {});
+    });
   };
 
-  /** Upload a resume (PDF or DOCX) and drive the reading pipeline. Returns
-   *  honest user-facing copy in both modes. */
-  const uploadResume = async (file: File): Promise<string> => {
-    if (!useBackend) {
-      const { message } = await DemoResumeService.upload(file);
-      setProfile((prev) => ({ ...prev, resume: file.name }));
-      return message;
-    }
-    const token = enrichPollToken.current;
-    const { record, message } = await httpResume.upload(file);
-    if (record === null) return message;
-    if (token !== enrichPollToken.current) return message; // logged out mid-upload
-    setResume(record);
-    enrichPollToken.current += 1; // cancel any poll for the previous resume
-    enrichPolling.current = false;
-    setEnrichment(null); // server drops the previous resume's dossier
-    setProfile((prev) => ({ ...prev, resume: record.fileName }));
-    void pollResume();
-    return message;
-  };
-
-  /** Profile photo: downscale first, then upload (backend) or keep a local
-   *  data URL (demo — says so). Returns honest user-facing copy. */
-  const setAvatarPhoto = async (file: File): Promise<string> => {
-    const prepared = await prepareAvatar(file);
-    if (prepared === null) return 'That image could not be read — try a different file.';
-    if (!useBackend) {
-      const url = await blobToDataUrl(prepared);
-      if (url === null) return 'That image could not be read — try a different file.';
-      setProfile((prev) => ({ ...prev, avatarUrl: url }));
-      return 'Photo kept in this browser only — not uploaded.';
-    }
-    const { avatarUrl, message } = await httpAvatar.upload(prepared);
-    if (avatarUrl !== null) setProfile((prev) => ({ ...prev, avatarUrl }));
-    return message;
-  };
+  /* ---------- actions ---------- */
 
   /**
-   * Backend live search: POST /searches (queues a scraper run), poll to
-   * terminal, list results, skill-score, and merge over kept saved rows.
-   * Saved rows always win on URL collision; fresh unsaved rows replace
-   * stale ones. Demo mode is a no-op — demo scanning lives in scan().
+   * Live hunt: queue a searchRuns row; reactive hooks stream progress and
+   * the leads list flows into the feed on completion. Demo mode is a no-op —
+   * demo scanning lives in scan().
    */
-  const runLiveSearch = async (query: string, country: string): Promise<void> => {
-    if (!useBackend) return;
-    setLiveSearch({ state: 'running', message: 'Starting live search…' });
+  const runLiveSearch = async (query: string, _country: string): Promise<void> => {
+    if (!serverReady) return;
+    setLiveSearch({ state: 'running', message: 'Queuing hunt…' });
     setScanning(true);
     try {
-      const fresh = await httpJobs.runLiveSearch(query, country, profile.skills, {
-        onStatus: (status) => setLiveSearch({ state: 'running', message: `Live search: ${status}…` }),
-        onSearchId: (id) => { liveSearchId.current = id; },
-      });
-      liveSearchId.current = null;
-      setJobs(prev => {
-        const kept = new Map(prev.filter(j => j.isSaved).map(j => [j.url, j]));
-        const out = [...kept.values()];
-        for (const j of fresh) {
-          const saved = kept.get(j.url);
-          out.push(saved !== undefined ? { ...j, isSaved: true, savedAt: saved.savedAt } : j);
-        }
-        return out;
-      });
-      setScannedAt(Date.now());
-      setNotif(n => n + 1);
-      // The hero query was consumed by the scrape run (boards are already
-      // software-scoped); clear it so the client-side substring filter
-      // doesn't hide the fresh rows. Skill ranking still orders the feed.
-      setSearch('');
-      setLiveSearch({ state: 'idle', message: `Live search loaded ${fresh.length} roles.` });
+      const id = await createRun({ query: query.trim().slice(0, 200) });
+      setLiveRunId(id);
     } catch (err) {
-      const code = typeof (err as { code?: unknown })?.code === 'string'
-        ? (err as { code: string }).code
-        : undefined;
-      setLiveSearch({ state: 'error', message: toUserMessage(err), ...(code !== undefined ? { code } : {}) });
-    } finally {
-      liveSearchId.current = null;
+      const clean = cleanConvexError(err);
+      setLiveSearch({ state: 'error', message: clean.message, ...(clean.code !== undefined ? { code: clean.code } : {}) });
       setScanning(false);
     }
   };
 
-  /** Release a stuck/running backend search (frees the one-active guard). */
+  /** Cancel the in-flight hunt (server folds queued tasks; UI banner idles). */
   const cancelLiveSearch = async (): Promise<void> => {
-    const id = liveSearchId.current;
-    liveSearchId.current = null;
-    if (useBackend) {
-      await httpJobs.cancelSearch(id);
-    } else {
-      logger.warn('cancel-search', 'No active search id to cancel.', {});
+    const id = liveRunId;
+    if (id !== null) {
+      try {
+        await cancelRun({ runId: id });
+      } catch (err) {
+        logger.warn('cancel-search', cleanConvexError(err).message, {});
+      }
     }
     setScanning(false);
-    setLiveSearch({ state: 'idle', message: 'Live search cancelled.' });
+    setLiveSearch({ state: 'idle', message: 'Hunt cancelled.' });
   };
 
   const dismissHotReply = useCallback((): void => {
     setHotReply(null);
-    if (useBackend) {
-      void httpOut
-        .markNotificationsReadRemote()
-        .catch(() => logger.warn('notifications-read', 'Could not mark reply notifications read.', {}));
-    }
+    logger.info('hot-reply-dismiss', 'Reply banner dismissed', {});
   }, []);
 
+  /** Profile photo: downscaled to a browser-local data URL. Clerk is the
+   *  account surface; Scout's API carries no avatar storage. */
+  const setAvatarPhoto = async (file: File): Promise<string> => {
+    const prepared = await prepareAvatar(file);
+    if (prepared === null) return 'That image could not be read — try a different file.';
+    const url = await blobToDataUrl(prepared);
+    if (url === null) return 'That image could not be read — try a different file.';
+    setProfile((prev) => ({ ...prev, avatarUrl: url }));
+    return 'Photo kept in this browser only — accounts are managed by Clerk.';
+  };
+
   const value = useMemo<Store>(() => ({
-    route, authed, restoring, onboarded, dark, profile, jobs, apps, sent, replies, notif, scanning, scannedAt, usage, backend: useBackend, search, selected, colorway,
+    route, authed, restoring, onboarded, dark, profile, jobs, apps, sent, notif, scanning, scannedAt, usage, backend: useBackend, search, selected, colorway,
     sidebarOpen, setSidebarOpen,
     hotReply, dismissHotReply,
     liveSearch, runLiveSearch, cancelLiveSearch,
-    resume, uploadResume, setAvatarPhoto,
-    enrichment, enrichBusy, startEnrichment, refreshEnrichment, pasteEnrichmentSource,
+    setAvatarPhoto,
     go: (r) => { window.history.pushState({}, '', '/' + r); setRoute(r); setSelected(null); setSidebarOpen(false); window.scrollTo({ top: 0 }); },
     login: (email, opts) => {
       logger.info('auth-login', 'User logged in', { user_id: hashUserId(email) });
       setSentryUser(email);
-      // Settle auth BEFORE the caller lifts any hold: otherwise `authed` and
-      // the visible page disagree for a full profile round trip. Server truth
-      // decides the destination; unreachable server (null) falls back to the
-      // local flag. An explicit server false re-arms the wizard (covers
-      // pre-migration accounts and shared-device account switches).
-      return syncProfile().then((completed) => {
-        if (completed === false) setOnboarded(false);
-        const next: Route = completed === true ? 'dashboard' : completed === false ? 'onboarding' : (onboarded ? 'dashboard' : 'onboarding');
-        setProfile(p => ({ ...p, email }));
-        setAuthed(true);
-        hydrateBackend();
-        // Silent (session restore) keeps the current deep link; View bounces
-        // auth-only routes to the dashboard on its own. Explicit logins land
-        // on server truth in the same commit as `authed`.
-        if (opts?.silent !== true) {
-          window.history.pushState({}, '', '/' + next); setRoute(next);
-        }
-      });
+      // Clerk owns identity; data flows in reactively once authed flips.
+      setProfile(p => ({ ...p, email }));
+      setAuthed(true);
+      if (opts?.silent !== true) {
+        const next: Route = onboarded ? 'dashboard' : 'onboarding';
+        window.history.pushState({}, '', '/' + next); setRoute(next);
+      }
+      return Promise.resolve();
     },
     logout: () => {
       setAuthed(false); setSentryUser(null);
-      // Drop the account's local footprint: a shared device must not leak the
-      // previous profile (name, resume…) or its onboarding flag into the next
-      // login — server hydration restores the right account's copy.
+      // Drop the account's local footprint: a shared device must not leak
+      // the previous profile or its onboarding flag into the next login.
       setProfile({ ...DEFAULT_PROFILE });
       setOnboarded(false);
-      setResume(null);
-      enrichPollToken.current += 1; // old account's in-flight poll must stop
-      enrichPolling.current = false;
-      setEnrichment(null);
       setHotReply(null);
       setSidebarOpen(false);
+      setLiveRunId(null);
+      setLiveSearch({ state: 'idle', message: '' });
+      setUsage(null);
+      setJobs([]);
+      setApps([]);
+      setSent([]);
+      setScanning(false);
       logger.info('auth-logout', 'User logged out', {});
       void authSignOut().finally(() => {
         window.history.pushState({}, '', '/login'); setRoute('login');
@@ -542,34 +472,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     onboard: (p) => {
       setProfile(prev => ({ ...prev, ...p, initials: initialsFor(p.name ?? prev.name, prev.initials) }));
       setOnboarded(true);
-      // Register completion server-side (best-effort, same honesty rules as
-      // update()): the local flag drives this device; the server flag lets a
-      // fresh device skip the wizard after hydration.
-      if (useBackend) {
-        void apiFetch('/profiles/me', { method: 'PATCH', body: { ...profilePatch(p), onboardingCompleted: true } }).catch(() =>
-          logger.warn('onboard-sync', 'Onboarding sync failed — local copy kept.', {}),
-        );
-      }
+      const completed = { ...profile, ...p } as Profile;
+      syncProfileToServer(completed, true);
       window.history.pushState({}, '', '/dashboard'); setRoute('dashboard');
-    },
-    update: (p) => {
+    }, update: (p) => {
       setProfile(prev => {
         const next = { ...prev, ...p };
         if (p.name !== undefined) next.initials = initialsFor(p.name, prev.initials);
+        syncProfileToServer(next, onboarded);
         return next;
       });
-      // Best-effort profile sync: local state is truth for the UI; the
-      // server copy catches up silently. Failures only log. profilePatch()
-      // translates only the supplied keys (surgical) and drops local-only
-      // ones (signature), so typing in one field never overwrites the rest.
-      if (useBackend) {
-        const patch = profilePatch(p);
-        if (Object.keys(patch).length > 0) {
-          void apiFetch('/profiles/me', { method: 'PATCH', body: patch }).catch(() =>
-            logger.warn('profile-sync', 'Profile sync failed — local copy kept.', {}),
-          );
-        }
-      }
     },
     toggleDark: () => {
       document.documentElement.classList.add('theme-suppress');
@@ -579,18 +491,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setSearch, select: setSelected,
     save: async (id) => {
       const cur = jobs.find(j => j.id === id);
-      const saving = cur ? !cur.isSaved : true;
+      if (cur === undefined) return;
+      const saving = !cur.isSaved;
       const stamp = saving ? today() : undefined;
-      // Server first when configured (best-effort): local flags still update
-      // so filters never lie about what the user just did.
-      if (useBackend && cur !== undefined) {
+      if (serverReady && cur.leadId !== undefined) {
         try {
-          await apiFetch('/jobs/saved', {
-            method: 'PATCH',
-            body: { canonicalUrl: cur.url, title: cur.title, company: cur.company, location: cur.location, saved: saving },
+          await setLeadStatus({
+            leadId: cur.leadId as Id<'leads'>,
+            status: saving ? 'saved' : 'new',
           });
-        } catch {
-          logger.warn('save-sync', 'Save sync failed — local flag kept.', {});
+        } catch (err) {
+          logger.warn('save-sync', cleanConvexError(err).message, {});
         }
       }
       setJobs(prev => prev.map(j => (j.id === id ? { ...j, isSaved: saving, savedAt: stamp } : j)));
@@ -598,75 +509,83 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setNotif(n => n + 1);
     },
     apply: async (id) => {
-      if (!useBackend) {
+      const j = jobs.find(x => x.id === id);
+      if (!j) return 'Lead not found.';
+      if (apps.some(a => a.jobId === id)) return 'Already in your pipeline.';
+      if (!serverReady) {
         const gate = DemoApplicationService.canApply(apps, id, today());
         if (!gate.ok) return gate.message;
-        const j = jobs.find(x => x.id === id); if (!j) return 'Role not found.';
         setApps(prev => [{ id: nextId('app'), jobId: id, title: j.title, company: j.company, logo: j.logo, appliedDate: today(), updatedAt: today(), status: 'UNDER REVIEW' }, ...prev]);
         setJobs(prev => prev.map(x => x.id === id ? { ...x, isSaved: true } : x));
         setNotif(n => n + 1);
         return gate.message;
       }
-      const j = jobs.find(x => x.id === id); if (!j) return 'Role not found.';
-      const pre = httpApp.canApply(apps, id, today());
-      if (!pre.ok) return pre.message;
-      const { row, message } = await httpApp.createRemote(
-        j.url,
-        { title: j.title, company: j.company, logo: j.logo },
-        currentRequestId(),
-      );
-      if (row === null) return message;
+      if (j.leadId === undefined) return 'This lead has no linked record yet.';
+      try {
+        await setLeadStatus({ leadId: j.leadId as Id<'leads'>, status: 'contacted' });
+      } catch (err) {
+        const clean = cleanConvexError(err);
+        return clean.message;
+      }
+      const row: Application = {
+        id: 'app:' + j.leadId, jobId: id, title: j.title, company: j.company, logo: j.logo,
+        appliedDate: today(), updatedAt: today(), status: 'UNDER REVIEW',
+        serverId: j.leadId, crm: 'contacted',
+      };
       setApps(prev => (prev.some(a => a.id === row.id) ? prev : [row, ...prev]));
       setJobs(prev => prev.map(x => x.id === id ? { ...x, isSaved: true } : x));
       setNotif(n => n + 1);
-      return message;
+      logger.info('apply', 'Lead moved to pipeline (contacted)', {});
+      return 'Lead moved to your pipeline. Scout records — it never auto-sends.';
     },
     advanceApp: async (id) => {
       const cur = apps.find(a => a.id === id);
       if (cur === undefined) return null;
-      if (!useBackend || cur.serverId === undefined) {
+      if (!serverReady || cur.serverId === undefined) {
         const next = DemoApplicationService.nextStatus(cur.status);
         if (next) { setApps(prev => DemoApplicationService.advance(prev, id, today())); setNotif(n => n + 1); }
         return next;
       }
-      const { row, message } = await httpApp.advanceRemote(cur.serverId);
-      if (row === null) {
-        logger.warn('advance-app', message, {});
+      const nextApp = DemoApplicationService.nextStatus(cur.status);
+      if (nextApp === null) return null;
+      const crm = nextCrm(cur);
+      if (crm === null) return cur.status;
+      try {
+        await setLeadStatus({ leadId: cur.serverId as Id<'leads'>, status: crm });
+      } catch (err) {
+        logger.warn('advance-app', cleanConvexError(err).message, {});
         return cur.status;
       }
-      setApps(prev => prev.map(a => (a.id === id ? { ...row, archived: a.archived } : a)));
+      setApps(prev => prev.map(a => (a.id === id ? { ...a, status: nextApp, crm: 'contacted' as const, updatedAt: today() } : a)));
       setNotif(n => n + 1);
-      logger.info('advance-app', message, {});
-      return row.status;
+      logger.info('advance-app', `Pipeline stage advanced (${nextApp})`, {});
+      return nextApp;
     },
     withdrawApp: async (id) => {
       const cur = apps.find(a => a.id === id);
-      if (useBackend && cur !== undefined && cur.serverId !== undefined) {
-        const message = await httpApp.withdrawRemote(cur.serverId);
-        logger.info('withdraw-app', message, {});
+      if (serverReady && cur?.serverId !== undefined) {
+        try {
+          await setLeadStatus({ leadId: cur.serverId as Id<'leads'>, status: 'dismissed' });
+        } catch (err) {
+          logger.warn('withdraw-app', cleanConvexError(err).message, {});
+        }
       }
       setApps(prev => DemoApplicationService.withdraw(prev, id)); setNotif(n => n + 1);
     },
     archiveApp: async (id, archived) => {
-      const cur = apps.find(a => a.id === id);
-      if (useBackend && cur !== undefined && cur.serverId !== undefined) {
-        const message = await httpApp.archiveRemote(cur.serverId, archived);
-        logger.info('archive-app', message, {});
-      }
       setApps(prev => prev.map(a => (a.id === id ? { ...a, archived } : a))); setNotif(n => n + 1);
     },
     scan: () => {
-      // Backend on: a real scraper run (the only source of live rows).
-      // Backend off: no fabricated roles — point at the missing backend and
-      // leave the feed untouched.
-      if (useBackend) {
-        const q = search.trim() || `${profile.roles.join(' ')} ${profile.skills}`.trim() || 'software engineer';
+      // Backend on: a real TinyFish hunt (the only source of live rows).
+      // Backend off: no fabricated leads — say so and leave the feed alone.
+      if (serverReady) {
+        const q = search.trim() || `${profile.roles.join(' ')} ${profile.skills}`.trim() || 'freelance software project';
         void runLiveSearch(q, '');
         return;
       }
       setLiveSearch({
         state: 'error',
-        message: 'Live search needs the backend — no roles were fetched.',
+        message: 'Live hunt needs the backend — no leads were fetched.',
       });
     },
     send: async (m) => {
@@ -675,23 +594,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         jobTitle: m.jobTitle ?? '', company: m.company ?? '',
         to: m.to, subject: m.subject, body: m.body,
       };
-      if (!useBackend) {
-        const gate = DemoOutreachService.canSend(sent.length, m.to);
-        if (!gate.ok) return gate.message;
-        setSent(prev => [entry, ...prev]);
-        setNotif(n => n + 1);
-        return gate.message;
-      }
-      const gate = httpOut.canSend(sent.length, m.to);
-      if (!gate.ok) return gate.message;
-      const { message } = await httpOut.sendRemote(m);
-      // Optimistic local entry so history reads instantly; server owns the
-      // cap truth (409 surfaces here as the cap message, not a guess).
-      if (message === 'Message queued for sending.') {
-        setSent(prev => [entry, ...prev]);
-        setNotif(n => n + 1);
-      }
-      return message;
+      // Scout keeps draft records only — sending is always the user's move.
+      void entry;
+      return 'Scout records drafts and pipeline stages but never sends — copy the email into your own client.';
     },
     clearSent: () => setSent([]),
     clearApps: () => setApps([]),
@@ -699,23 +604,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setColorway,
     setRestoring,
     setSignOutAction: (fn) => { signOutActionRef.current = fn; },
-  }), [route, authed, restoring, onboarded, dark, profile, jobs, apps, sent, replies, notif, scanning, scannedAt, usage, search, selected, colorway, sidebarOpen, liveSearch, runLiveSearch, cancelLiveSearch, resume, uploadResume, setAvatarPhoto, enrichment, enrichBusy, startEnrichment, refreshEnrichment, pasteEnrichmentSource, hotReply, dismissHotReply]);
+  }), [route, authed, restoring, onboarded, dark, profile, jobs, apps, sent, notif, scanning, scannedAt, usage, search, selected, colorway, sidebarOpen, liveSearch, serverReady, serverLeads, serverProfileRow, serverUsage, dismissHotReply, createRun, cancelRun, setLeadStatus, saveConvexProfile, liveRunId]);
 
-  // Session restore (P2): after an OAuth redirect-back the browser holds a
-  // valid session cookie but local state still says logged-out. Exactly one
-  // best-effort check per logged-out lifetime; failure stays logged out.
-  // Ordering invariant (the "login flashed after login" bug): the probe must
-  // NOT lift the `restoring` hold until the auth decision has been committed.
-  // Lifting it first renders Login + rewrites the URL to /login for a full
-  // profile round trip, then bounces to the dashboard — a visible login flash
-  // on every cookie-boot (OAuth return, fresh device, cleared storage).
-  // StrictMode-safe: a cancelled probe result is dropped via `live` and the
-  // re-run re-probes; once the decision is locked ('done') re-runs skip.
   // Clerk sign-out handoff: the AuthBridge registers signOut() here once the
   // provider mounts; logout() delegates instead of poking Clerk directly.
   const signOutActionRef = useRef<(() => Promise<void>) | null>(null);
-  // NOTE: the better-auth boot probe lived here; with Clerk the AuthBridge
-  // (components/AuthBridge.tsx) owns session restore + authed flips.
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

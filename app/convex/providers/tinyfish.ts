@@ -36,7 +36,7 @@ export function toProviderError(e: unknown): ProviderError {
   return new ProviderError({ message: e instanceof Error ? e.message : 'Unknown provider failure', retryable: true });
 }
 
-function apiKey(ctx: ActionCtx): string {
+function apiKey(_ctx: ActionCtx): string {
   const key = process.env.TINYFISH_API_KEY;
   if (typeof key !== 'string' || key.length < 8) {
     throw new ProviderError({ message: 'TINYFISH_API_KEY is not set on this Convex deployment', retryable: false });

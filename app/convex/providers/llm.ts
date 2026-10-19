@@ -1,6 +1,5 @@
 "use node";
 import type { ActionCtx } from '../_generated/server';
-import { LIMITS } from '../lib/limits';
 
 /**
  * LLM adapter (SPEC §7): one OpenAI-compatible chat completion endpoint.
@@ -19,7 +18,7 @@ export class LlmError extends Error {
 
 interface ChatMessage { role: 'system' | 'user'; content: string }
 
-export function llmKey(ctx: ActionCtx): string | null {
+export function llmKey(_ctx: ActionCtx): string | null {
   const key = process.env.LLM_API_KEY;
   return typeof key === 'string' && key.length >= 8 ? key : null;
 }

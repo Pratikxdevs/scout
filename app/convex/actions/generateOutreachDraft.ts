@@ -71,5 +71,3 @@ export const generate = internalAction({
   },
 });
 
-type IdT = Id<'outreachDrafts'>;
-

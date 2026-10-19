@@ -3,6 +3,8 @@ export interface Job {
   location: string; compensation: string; description: string;
   requirements: string[]; match: number; isSaved?: boolean; savedAt?: string; url: string;
   posted: string; type: 'Full-time' | 'Contract' | 'Part-time';
+  /** Convex leads._id when the row was served by the backend (Scout wave 13). */
+  leadId?: string;
 }
 export interface Application {
   id: string; jobId: string; title: string; company: string; logo?: string;
@@ -10,6 +12,8 @@ export interface Application {
   status: 'UNDER REVIEW' | 'INTERVIEW SET' | 'OFFERED' | 'REJECTED' | 'WITHDRAWN';
   /** Convex _id for server-backed rows (absent on local demo rows). Added 04-04. */
   serverId?: string;
+  /** Server CRM state behind the row — disambiguates the UNDER REVIEW↑ stage. */
+  crm?: 'saved' | 'contacted';
 }
 export interface Profile {
   name: string; email: string; initials: string; status: string;
