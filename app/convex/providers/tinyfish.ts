@@ -256,13 +256,25 @@ export async function runAgent(
     if (!res.ok) {
       throw classify(res.status, `agent ${await readErrorBody(res)}`);
     }
-    const body = (await res.json()) as { result?: unknown; output?: unknown; status?: unknown; message?: unknown };
-    const text = typeof body.result === 'string' ? body.result
-      : typeof body.output === 'string' ? body.output
-      : typeof body.message === 'string' ? body.message
-      : '';
-    if (z(body.status).toLowerCase() === 'failed' || text === '') {
-      throw new ProviderError({ message: 'TinyFish agent returned no usable page content', retryable: false });
+    const body = (await res.json()) as {
+      result?: unknown; output?: unknown; status?: unknown; message?: unknown; error?: unknown;
+    };
+    // Live contract (verified 2026-10-20): result is NESTED —
+    // { run_id, status: 'COMPLETED', result: { result: '<text>', error: null } }.
+    // Older/spec shapes kept for safety: flat string result, output, message.
+    const nested = (typeof body.result === 'object' && body.result !== null) ? body.result as { result?: unknown; error?: unknown } : null;
+    const firstText = (...cands: unknown[]): '' | string => {
+      for (const c of cands) if (typeof c === 'string') return c;
+      return '';
+    };
+    const text = firstText(body.result, body.output, nested?.result, body.message);
+    const agentErr = body.error ?? nested?.error;
+    const failed = z(body.status).toLowerCase() === 'failed'
+      || text === ''
+      || (typeof agentErr === 'string' && agentErr !== '');
+    if (failed) {
+      const why = typeof agentErr === 'string' && agentErr !== '' ? `TinyFish agent errored: ${agentErr.slice(0, 160)}` : 'TinyFish agent returned no usable page content';
+      throw new ProviderError({ message: why, retryable: false });
     }
     return { url, finalUrl: url, title: `Agent: ${goal.slice(0, 60)}`, description: '', textMarkdown: text.slice(0, LIMITS.PAGE.MAX_EXCERPT_CHARS) };
   });
