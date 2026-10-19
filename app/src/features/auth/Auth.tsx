@@ -180,7 +180,7 @@ export function Login() {
         {err ? <span className="auth-err" role="alert">{err}</span> : null}
       </form>
       <p className="auth-swap">
-        <span className="muted">New to jobwzrd?</span>{' '}
+        <span className="muted">New to Scout?</span>{' '}
         <button className="link" onClick={() => go('signup')}>Create account</button>
       </p>
       <SocialButtons onErr={setErr} />
@@ -369,7 +369,7 @@ function AuthBrand() {
       <span className="auth-badge" aria-hidden="true">
         <img src="/logo.svg" alt="" width={24} height={24} />
       </span>
-      <p className="t-brand" style={{ margin: 0 }}>jobwzrd</p>
+      <p className="t-brand" style={{ margin: 0 }}>scout</p>
     </div>
   );
 }

@@ -33,7 +33,7 @@ export function enforceCanonicalLoopback(): boolean {
   try {
     const next = canonicalLoopbackRedirect(window.location.href);
     if (next === null) return false;
-    window.console.info(`[jobwzrd] canonical origin → ${next}`);
+    window.console.info(`[scout] canonical origin → ${next}`);
     window.location.replace(next);
     return true;
   } catch {

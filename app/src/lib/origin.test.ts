@@ -14,7 +14,7 @@ describe('loopback canonicalization (OAuth state-cookie origin)', () => {
     assert.equal(canonicalLoopbackRedirect('http://localhost:2992/'), null);
     assert.equal(canonicalLoopbackRedirect('http://192.168.1.20:2992/'), null);
     assert.equal(canonicalLoopbackRedirect('http://localhost:8090/'), null);
-    assert.equal(canonicalLoopbackRedirect('https://app.jobwzrd.io/jobs'), null);
+    assert.equal(canonicalLoopbackRedirect('https://app.scoutlead.io/jobs'), null);
     assert.equal(canonicalLoopbackRedirect('not a url'), null);
   });
 });

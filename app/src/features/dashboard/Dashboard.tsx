@@ -66,11 +66,10 @@ export function Dashboard() {
     { label: 'Offers', value: offers, delta: offers > 0 ? `${offers} received` : 'None yet', tone: 'teal', tile: 'badge', spark: '0,28 15,26 30,27 45,22 60,24 75,18 90,16', id: 'sp4' },
   ];
   const quick: { title: string; sub: string; icon: React.ReactNode; route: Parameters<typeof go>[0] }[] = [
-    { title: 'Find matched jobs', sub: 'Search your live feed', icon: <MagnifyingGlassIcon width={18} />, route: 'jobs' },
-    { title: 'See match ranking', sub: 'Ranked by skill overlap', icon: <SparklesIcon width={18} />, route: 'match' },
-    { title: 'Compose outreach', sub: 'Draft, review, send', icon: <PaperAirplaneIcon width={18} />, route: 'outreach' },
-    { title: 'View applications', sub: 'Track progress', icon: <UserIcon width={18} />, route: 'applications' },
-    { title: 'Explore companies', sub: 'Research & save', icon: <BuildingOffice2Icon width={18} />, route: 'companies' },
+    { title: 'Run a hunt', sub: 'Fresh freelance leads, live from the web', icon: <MagnifyingGlassIcon width={18} />, route: 'search' },
+    { title: 'Your leads', sub: 'Every lead Scout scored for you', icon: <SparklesIcon width={18} />, route: 'jobs' },
+    { title: 'Outreach pipeline', sub: 'Track pings and replies', icon: <UserIcon width={18} />, route: 'applications' },
+    { title: 'Tune your ICP', sub: 'Who you sell to, and for how much', icon: <BuildingOffice2Icon width={18} />, route: 'settings' },
   ];
   return (
     <div style={{ display: 'grid', gap: 14 }}>
@@ -115,8 +114,8 @@ export function Dashboard() {
               </div>
             </div>
             <div className="row" style={{ gap: 8 }}>
-              <button className="btn" onClick={() => go('inbox')}>
-                Open inbox <ArrowRightIcon width={15} />
+              <button className="btn" onClick={() => go('applications')}>
+                Open pipeline <ArrowRightIcon width={15} />
               </button>
               <button className="btn btn-ghost" onClick={dismissHotReply}>Dismiss</button>
             </div>

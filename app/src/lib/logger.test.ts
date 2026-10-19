@@ -67,7 +67,7 @@ describe('logger levels and ids', () => {
     assert.equal(line.request_id, requestId);
     assert.equal(line.request_id, currentRequestId());
     assert.ok(typeof line.session_id === 'string' && line.session_id.length > 0);
-    assert.equal(line.service, 'jobwzrd-app');
+    assert.equal(line.service, 'scout-app');
     endRequest();
   });
 

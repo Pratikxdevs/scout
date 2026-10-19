@@ -17,6 +17,9 @@ export interface Profile {
   resume: string; signature: string; summary: string; city: string; country: string;
   /** Profile photo: server storage URL when signed in, local data URL in demo. */
   avatarUrl?: string;
+  /** Scout ICP (SPEC §2): what you sell and who you sell it to. */
+  services?: string[]; industries?: string[]; keywords?: string[];
+  minBudget?: number | null; maxBudget?: number | null;
 }
 /** Pipeline stages the server walks while reading an uploaded resume. */
 export type ResumeStage = 'reading' | 'ai_queued' | 'ai_wait' | 'ai_running' | 'ready' | 'failed';
@@ -117,6 +120,5 @@ export interface DemoResult { ok: boolean; message: string }
 /** Backend scrape-run progress for the Find Jobs first-open flow. */
 export interface LiveSearchState { state: 'idle' | 'running' | 'error'; message: string; code?: string }
 export type Route =
-  | 'dashboard' | 'search' | 'jobs' | 'match' | 'applications' | 'companies'
-  | 'outreach' | 'inbox'
+  | 'dashboard' | 'search' | 'jobs' | 'applications'
   | 'settings' | 'login' | 'signup' | 'onboarding' | 'notfound';

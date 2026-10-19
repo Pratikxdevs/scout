@@ -44,6 +44,7 @@ interface Store {
   sent: OutreachMail[]; replies: Reply[]; notif: number; scanning: boolean;
   scannedAt: number | null; usage: Usage | null;
   backend: boolean; restoring: boolean;
+  sidebarOpen: boolean; setSidebarOpen: (v: boolean) => void;
   hotReply: HotReply | null; dismissHotReply: () => void;
   search: string; selected: Job | null; colorway: string;
   go: (r: Route) => void; login: (email: string, opts?: { silent?: boolean }) => Promise<void>; signup: (name: string, email: string) => void; logout: () => void;
@@ -73,7 +74,7 @@ function load<T>(k: string, fb: T): T {
 }
 function persist(k: string, v: unknown) { saveStored(k, v); }
 
-const VALID: Route[] = ['dashboard', 'search', 'jobs', 'match', 'applications', 'companies', 'outreach', 'inbox', 'settings', 'login', 'signup', 'onboarding', 'notfound'];
+const VALID: Route[] = ['dashboard', 'search', 'jobs', 'applications', 'settings', 'login', 'signup', 'onboarding', 'notfound'];
 
 /** Account-scoped starting profile: used on first boot and again on logout,
  *  so one account's cached footprint never bleeds into the next login.
@@ -132,6 +133,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Job | null>(null);
   const [colorway, setColorway] = useState(() => load(KEYS.colorway, DEFAULT_COLORWAY));
+  // Mobile drawer (opened from the topbar burger).
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   // Backend scrape-run progress (session-only: never persisted).
   const [liveSearch, setLiveSearch] = useState<LiveSearchState>({ state: 'idle', message: '' });
   // Active backend search id for Cancel (ref: only read in click handlers).
@@ -479,11 +482,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<Store>(() => ({
     route, authed, restoring, onboarded, dark, profile, jobs, apps, sent, replies, notif, scanning, scannedAt, usage, backend: useBackend, search, selected, colorway,
+    sidebarOpen, setSidebarOpen,
     hotReply, dismissHotReply,
     liveSearch, runLiveSearch, cancelLiveSearch,
     resume, uploadResume, setAvatarPhoto,
     enrichment, enrichBusy, startEnrichment, refreshEnrichment, pasteEnrichmentSource,
-    go: (r) => { window.history.pushState({}, '', '/' + r); setRoute(r); setSelected(null); window.scrollTo({ top: 0 }); },
+    go: (r) => { window.history.pushState({}, '', '/' + r); setRoute(r); setSelected(null); setSidebarOpen(false); window.scrollTo({ top: 0 }); },
     login: (email, opts) => {
       logger.info('auth-login', 'User logged in', { user_id: hashUserId(email) });
       setSentryUser(email);

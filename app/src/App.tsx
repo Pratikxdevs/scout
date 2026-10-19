@@ -13,11 +13,7 @@ const Dashboard = lazy(() => import('./features/dashboard/Dashboard').then((m) =
 const Jobs = lazy(() => import('./features/jobs/Jobs').then((m) => ({ default: m.Jobs })));
 const SearchHome = lazy(() => import('./features/search/SearchHome').then((m) => ({ default: m.SearchHome })));
 const JobDetail = lazy(() => import('./features/jobs/JobDetail').then((m) => ({ default: m.JobDetail })));
-const Match = lazy(() => import('./features/match/Match').then((m) => ({ default: m.Match })));
 const Applications = lazy(() => import('./features/applications/Applications').then((m) => ({ default: m.Applications })));
-const Companies = lazy(() => import('./features/companies/Companies').then((m) => ({ default: m.Companies })));
-const Outreach = lazy(() => import('./features/outreach/Outreach').then((m) => ({ default: m.Outreach })));
-const Inbox = lazy(() => import('./features/inbox/Inbox').then((m) => ({ default: m.Inbox })));
 const Settings = lazy(() => import('./features/settings/Settings').then((m) => ({ default: m.Settings })));
 
 function RouteFallback() {
@@ -37,7 +33,7 @@ function NotFound() {
       <div className="card-pad" style={{ display: 'grid', gap: 10, textAlign: 'center', padding: '30px 16px' }}>
         <h1 className="t-h2" id="nf-title">Page not found</h1>
         <p className="muted t-small" style={{ margin: 0 }}>
-          That address doesn&apos;t match a jobwzrd page. Your data is untouched.
+          That address doesn&apos;t match a Scout page. Your data is untouched.
         </p>
         <div>
           <button className="btn" onClick={() => go('dashboard')}>Back to dashboard</button>
@@ -96,11 +92,7 @@ function View() {
         <Suspense fallback={<RouteFallback />}>
         {route === 'dashboard' ? <Dashboard /> : null}
         {route === 'jobs' ? <Jobs /> : null}
-        {route === 'match' ? <Match /> : null}
         {route === 'applications' ? <Applications /> : null}
-        {route === 'companies' ? <Companies /> : null}
-        {route === 'outreach' ? <Outreach /> : null}
-        {route === 'inbox' ? <Inbox /> : null}
         {route === 'settings' ? <Settings /> : null}
         {route === 'notfound' ? <NotFound /> : null}
         </Suspense>

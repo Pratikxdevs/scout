@@ -1,20 +1,17 @@
-import { BellIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
+import { BellIcon, MagnifyingGlassIcon, Bars3Icon } from '@heroicons/react/24/outline';
 import { useStore } from '../store';
 import { LogoBadge } from './LogoBird';
 
 /**
  * Fixed universal Topbar / Nav bezel.
- * Minimal: jobwzrd brand left, search + notifications right.
- * Flat off-white silhouette with white edges, no frost, no links.
+ * Minimal: Scout brand left (burger on mobile), search + pipeline right.
+ * Full-bleed silhouette — flat top bleeds off viewport at y=0 and the
+ * bar spans the full width on both mobile and desktop.
  */
-
-/** Narrow bezel silhouette (~75% width) — flat top bleeds off viewport at y=0,
- *  ~56deg straight diagonal chamfers, tangent-smooth bottom joins. */
-const UNI_BEZEL_D =
-  'M210,62 H990 C1004,62 1018,60 1026,48 L1058,0 H142 L174,48 C182,60 196,62 210,62 Z';
+const UNI_BEZEL_D = 'M0,0 H1200 V48 Q1200,62 1186,62 H14 Q0,62 0,48 Z';
 
 export function UniversalTopbar() {
-  const { go, notif } = useStore();
+  const { go, notif, sidebarOpen, setSidebarOpen } = useStore();
   return (
     <header className="uni-wrap fixed inset-x-0 top-0 z-50 px-[7px] md:px-3 pt-[env(safe-area-inset-top)] pointer-events-none">
       <nav className="uni-nav pointer-events-auto relative w-full h-12 md:h-14" aria-label="Primary">
@@ -27,22 +24,34 @@ export function UniversalTopbar() {
         >
           <path d={UNI_BEZEL_D} strokeWidth={1} style={{ fill: 'var(--card)', stroke: 'var(--border)' }} />
         </svg>
-        {/* INNER */}
+        {/* INNER — burger (mobile) + brand left, actions right */}
         <div className="uni-inner relative z-10 flex items-center justify-between h-full">
-          <a
-            className="uni-brand"
-            href="/dashboard"
-            aria-label="jobwzrd home"
-            onClick={e => {
-              e.preventDefault();
-              go('dashboard');
-            }}
-          >
-            <span className="uni-brand-bird">
-              <LogoBadge size={28} />
-            </span>
-            <span className="uni-word">jobwzrd</span>
-          </a>
+          <div className="flex min-w-0 items-center">
+            <button
+              type="button"
+              className="uni-icon uni-burger"
+              aria-label="Open menu"
+              aria-expanded={sidebarOpen}
+              title="Menu"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Bars3Icon />
+            </button>
+            <a
+              className="uni-brand"
+              href="/dashboard"
+              aria-label="Scout home"
+              onClick={e => {
+                e.preventDefault();
+                go('dashboard');
+              }}
+            >
+              <span className="uni-brand-bird">
+                <LogoBadge size={28} />
+              </span>
+              <span className="uni-word">scout</span>
+            </a>
+          </div>
           <div className="uni-actions">
             <button
               type="button"
@@ -56,9 +65,9 @@ export function UniversalTopbar() {
             <button
               type="button"
               className="uni-icon"
-              aria-label={`Notifications${notif ? `, ${notif} unread` : ''}`}
-              title="Notifications"
-              onClick={() => go('inbox')}
+              aria-label={`Pipeline${notif ? `, ${notif} responses` : ''}`}
+              title="Your pipeline"
+              onClick={() => go('applications')}
             >
               <BellIcon />
               {notif > 0 ? <span className="uni-badge">{notif}</span> : null}

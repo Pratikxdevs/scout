@@ -18,7 +18,6 @@ import { useStore, todayStr } from '../../store';
 import { CopyButton, FormNote, LogoImg } from '../../components/ui';
 import { isSafeHttpUrl } from '../../lib/urls';
 import { appliesToday } from '../../lib/caps';
-import { COMPANY_PROFILES } from '../../data/companies';
 import { ApplyConfirmDialog } from './ApplyConfirm';
 
 const TABS = ['Overview', 'Requirements', 'About the company', 'Tech stack'] as const;
@@ -51,13 +50,11 @@ export function JobDetail() {
     return () => window.removeEventListener('keydown', onKey);
   }, [select, confirming]);
   if (!j) return null;
-  const applied = apps.some(a => a.jobId === j.id);
-  const { used, cap } = appliesToday(backend, usage, apps, todayStr());
+  const applied = apps.some(a => a.jobId === j.id);  const { used, cap } = appliesToday(backend, usage, apps, todayStr());
   const capReached = !applied && used >= cap;
   const responsibilities = j.requirements.slice(0, 4);
   const requirements = j.requirements;
   const stack = techStackFor(j.requirements, j.description);
-  const company = COMPANY_PROFILES.find(c => c.name === j.company);
   const safeUrl = isSafeHttpUrl(j.url) ? j.url : null;
 
   return (
@@ -170,8 +167,7 @@ export function JobDetail() {
             {tab === 'About the company' && (
               <section className="jobcard-sec">
                 <h2>About {j.company}</h2>
-                <p>{company?.about ?? `${j.company} is hiring for this role.`}</p>
-                {company && <p className="muted t-small" style={{ marginTop: 8 }}>{company.hq} · Founded {company.founded} · {company.staff} employees</p>}
+              <p>{j.company} is the hiring source for this lead — open the original posting for full details.</p>
               </section>
             )}
             {tab === 'Tech stack' && (

@@ -9,11 +9,9 @@ import { authClient } from '../../lib/authClient';
 import { oauthErrorCopy, readQueryError, takeQueryError } from '../../lib/oauthErrors';
 import { COLORWAYS } from '../../theme/palettes';
 import { ChipInput, ConfirmButton, ConfirmDialog, EditableAvatar } from '../../components/ui';
-import { ProfileEnrichment } from '../profile/ProfileEnrichment';
 import { COUNTRIES } from '../../lib/countries';
 import { isValidEmail } from '../../lib/validate';
 import { SALARY_FLOORS, salaryPlus } from '../../lib/salary';
-import { clearDraft } from '../../lib/outreachDraft';
 
 const WORK_TYPES = ['Remote', 'Hybrid', 'On-site'];
 const SALARIES = SALARY_FLOORS.map(salaryPlus);
@@ -41,7 +39,7 @@ export function Settings() {
   };
 
   const clearData = () => {
-    clearSent(); clearApps(); clearDraft();
+    clearSent(); clearApps();
   };
   const reboot = () => {
     // Keep only the current profile key (jw3). The old jw2 key held the demo
@@ -58,7 +56,7 @@ export function Settings() {
     const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), profile, apps, sent, savedJobs }, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'jobwzrd-export.json';
+    a.download = 'scout-export.json';
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -73,8 +71,6 @@ export function Settings() {
           <p className="muted t-small" style={{ margin: '8px 0 0' }}>Manage your account, personalize outreach, and configure the app to your workflow.</p>
         </div>
       </section>
-
-      <ProfileEnrichment />
 
       <div className="grid-2">
         {/* account & profile */}
@@ -156,7 +152,7 @@ export function Settings() {
             <span className="set-ic"><EnvelopeIcon width={20} /></span>
             <span style={{ flex: '1 1 auto', minWidth: 0 }}>
               <strong className="t-h3">Email &amp; Outreach</strong>
-              <span className="muted t-small">Configure how jobwzrd composes and sends outreach emails.</span>
+              <span className="muted t-small">Configure how Scout composes and sends outreach emails.</span>
             </span>
           </div>
           <div className="set-line">

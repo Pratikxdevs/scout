@@ -100,6 +100,20 @@ input[type="checkbox"], input[type="radio"] { width: auto; }
   align-items: center; justify-content: center; }
 .main { max-width: none; margin: 0 auto; padding: 16px 12px var(--dock-space); flex: 1; min-width: 0; }
 .body-row { display: flex; align-items: stretch; flex: 1; min-height: 0; }
+/* mobile drawer (sidebar opened from the topbar burger) */
+.drawer { display: contents; }
+.uni-burger, .drawer-close { display: none; }
+@media (max-width: 1079px) {
+  .uni-burger { display: inline-flex; }
+  .drawer-backdrop { display: none; position: fixed; inset: 0; z-index: 58;
+    background: rgba(18, 22, 35, .5); }
+  .drawer-backdrop[data-open="true"] { display: block; }
+  .sidebar.drawer-open { display: block; position: fixed; z-index: 60;
+    top: 0; bottom: 0; left: 0; width: min(80vw, 300px);
+    background: var(--paper); box-shadow: 20px 0 60px rgba(20, 24, 40, .28); }
+  .sidebar.drawer-open .drawer-close { display: inline-flex; position: absolute;
+    top: 10px; right: 10px; }
+}
 .sidebar { display: none; width: clamp(240px, 15vw, 250px); flex-shrink: 0; position: sticky; top: var(--topbar-h); height: calc(100vh - var(--topbar-h)); height: calc(100dvh - var(--topbar-h));
   overflow-y: auto; overscroll-behavior: contain; padding: 16px 8px; border-right: 1px solid var(--border); }
 .sidebar svg { width: 19px; height: 19px; }
@@ -646,7 +660,8 @@ kbd { font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--bo
 .uni-shape { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .uni-inner { position: relative; z-index: 10; display: flex; align-items: center;
   justify-content: space-between; gap: 12px; height: 100%;
-  padding-left: 15%; padding-right: 15%; color: var(--ink); }
+  padding-left: 12px; padding-right: 12px; color: var(--ink); }
+@media (min-width: 768px) { .uni-inner { padding-left: 16px; padding-right: 16px; } }
 .uni-brand { display: inline-flex; align-items: center; gap: 9px; text-decoration: none;
   color: inherit; min-width: 0; }
 .uni-brand-bird { color: var(--ink); display: inline-flex; flex-shrink: 0; }

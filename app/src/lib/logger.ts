@@ -190,7 +190,7 @@ function defaultTransport(lines: LogLine[], ingestUrl: string): Promise<void> {
   return fetch(ingestUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ service: 'jobwzrd-app', lines }),
+    body: JSON.stringify({ service: 'scout-app', lines }),
     keepalive: true,
   }).then(
     () => undefined,
@@ -216,7 +216,7 @@ function arm(): void {
         try {
           const { ingestUrl, viewerUrl } = config();
           if (buffer.length === 0 || typeof navigator === 'undefined' || !navigator.sendBeacon) return;
-          const payload = JSON.stringify({ service: 'jobwzrd-app', lines: buffer.splice(0, buffer.length) });
+          const payload = JSON.stringify({ service: 'scout-app', lines: buffer.splice(0, buffer.length) });
           if (ingestUrl) navigator.sendBeacon(ingestUrl, payload);
           // Live viewer mirror: navigation would otherwise eat the lines
           // (the interval flush never fires before unload).
@@ -246,7 +246,7 @@ export function flush(): Promise<void> {
       fetch(viewerUrl.replace(/\/$/, '') + '/ingest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ service: 'jobwzrd-app', lines }),
+        body: JSON.stringify({ service: 'scout-app', lines }),
         keepalive: true,
       }).then(
         () => undefined,
@@ -273,7 +273,7 @@ function emit(level: LogLevel, event: string, msg: string, context: Record<strin
     level,
     event,
     msg,
-    service: 'jobwzrd-app',
+    service: 'scout-app',
     env,
     request_id: currentRequestId(),
     session_id: sessionId,
