@@ -14,6 +14,7 @@ import type * as actions_generateOutreachDraft from "../actions/generateOutreach
 import type * as actions_qualifyLeads from "../actions/qualifyLeads.js";
 import type * as actions_resumePipeline from "../actions/resumePipeline.js";
 import type * as activityLogs from "../activityLogs.js";
+import type * as devprobe from "../devprobe.js";
 import type * as leads from "../leads.js";
 import type * as lib_actor from "../lib/actor.js";
 import type * as lib_aiProfile from "../lib/aiProfile.js";
@@ -51,6 +52,7 @@ declare const fullApi: ApiFromModules<{
   "actions/qualifyLeads": typeof actions_qualifyLeads;
   "actions/resumePipeline": typeof actions_resumePipeline;
   activityLogs: typeof activityLogs;
+  devprobe: typeof devprobe;
   leads: typeof leads;
   "lib/actor": typeof lib_actor;
   "lib/aiProfile": typeof lib_aiProfile;
