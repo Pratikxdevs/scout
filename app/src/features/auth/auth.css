@@ -189,3 +189,28 @@
   .auth-cta:active, .auth-soc:active { transform: none; }
   .auth-cta svg { transform: none; }
 }
+
+/* ---------- Clerk widget integration ----------
+   The appearance theme paints; these rules handle STRUCTURE the theme
+   can't reach: full-width embedding so the Clerk card dissolves into
+   .auth-card (one surface, one lockup — no nested box-on-box), and the
+   bot-challenge iframe kept inside the frame's flow instead of floating
+   over the shell's logo. */
+.clerk-frame { width: 100%; }
+.clerk-frame .cl-rootBox,
+.clerk-frame .cl-cardBox,
+.clerk-frame .cl-card,
+.clerk-frame [class*='internal-cardBox'],
+.clerk-frame [class*='internal-card'] { background: transparent; box-shadow: none; border: 0; width: 100%; }
+.clerk-frame [class*='internal-header'] { display: none; }
+.clerk-frame .cl-footer,
+.clerk-frame [class*='internal-footer'] { display: none !important; }
+.clerk-frame .cl-socialButtonRow { gap: 8px; }
+.clerk-frame .cl-formButtonPrimary:not(:disabled):hover,
+.clerk-frame [class*='internal-formButtonPrimary']:not(:disabled):hover { filter: brightness(1.06); }
+.clerk-frame .cl-recaptcha,
+.clerk-frame [class*='internal-recaptcha'] { margin-top: 10px; max-width: 100%; }
+.clerk-frame .cl-recaptcha iframe { max-width: 100%; position: relative; }
+/* hover affordance on the social buttons to match Scout inputs */
+.clerk-frame .cl-socialButton:hover,
+.clerk-frame [class*='internal-socialButton']:hover { background: color-mix(in srgb, var(--border) 35%, var(--card)); }

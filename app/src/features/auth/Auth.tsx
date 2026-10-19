@@ -1,6 +1,7 @@
 import { SignIn, SignUp } from '@clerk/react';
 import { useStore } from '../../store';
 import { backendOn as backendConfigured } from '../../services/api';
+import { sansStack } from '../../theme/typography';
 import {
   ChartBarIcon, EnvelopeIcon, MagnifyingGlassIcon, PaperAirplaneIcon, ShieldCheckIcon, UserGroupIcon,
 } from '@heroicons/react/24/outline';
@@ -13,6 +14,69 @@ import './auth.css';
  * so demo/backend mode can never fork per file. */
 const backendOn: boolean = backendConfigured();
 
+/* Clerk widget skinned to disappear INTO the Scout card: transparent
+ * chrome (our .auth-card is the surface), Scout tokens for paint, no
+ * Clerk logo/title header — the Scout badge above is the only lockup. */
+const CLERK_APPEARANCE = {
+  variables: {
+    colorPrimary: 'var(--primary)',
+    colorText: 'var(--ink)',
+    colorTextSecondary: 'var(--muted)',
+    colorBackground: 'transparent',
+    colorInputBackground: 'var(--paper)',
+    colorInputText: 'var(--ink)',
+    colorInputPlaceholder: 'var(--muted)',
+    colorInputBorder: 'var(--border)',
+    colorSuccess: 'var(--success)',
+    colorDanger: '#b3261e',
+    borderRadius: '12px',
+    fontFamily: sansStack(),
+    fontSize: '14px',
+  },
+  layout: {
+    logoPlacement: 'none',
+    socialButtonsPlacement: 'top',
+    showOptionalFields: false,
+  },
+  elements: {
+    rootBox: { width: '100%' },
+    cardBox: { background: 'transparent', boxShadow: 'none', border: 'none', borderRadius: '0' },
+    card: { background: 'transparent', boxShadow: 'none', borderRadius: '0' },
+    header: { display: 'none' },           // Clerk's own title/logo — replaced by our brand lockup
+    main: { padding: 0 },
+    socialButtonsBlock: { padding: 0, marginBottom: 4 },
+    socialButtonsRow: { gap: 8 },
+    socialButton: {
+      background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--ink)',
+      borderRadius: '12px', fontWeight: 500, fontSize: '13.5px', height: '42px',
+      boxShadow: 'none',
+    },
+    dividerRow: { padding: '10px 0' },
+    dividerLine: { background: 'var(--border)', height: 1 },
+    dividerText: { color: 'var(--muted)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '.08em' },
+    formButtonPrimary: {
+      background: 'var(--primary)', color: 'var(--primary-ink)', border: 'none',
+      borderRadius: '14px', fontWeight: 600, fontSize: '14.5px', height: '44px',
+      boxShadow: 'none', marginTop: 4,
+    },
+    formFieldRow: { gap: 12 },
+    formFieldLabel: { color: 'var(--ink)', fontWeight: 500, fontSize: '13px' },
+    formFieldInput: {
+      background: 'var(--paper)', border: '1px solid var(--border)', color: 'var(--ink)',
+      borderRadius: '12px', height: '44px', boxShadow: 'none', fontSize: '14px',
+    },
+    identityPreview: { background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: '12px' },
+    alertText: { color: '#b3261e', fontSize: '13px' },
+    otpCodeFieldInput: {
+      background: 'var(--paper)', border: '1px solid var(--border)', color: 'var(--ink)',
+      borderRadius: '10px',
+    },
+    footerAction: { padding: 0, marginTop: 2, fontSize: '13px' },
+    footerActionLink: { color: 'var(--primary)', fontWeight: 500 },
+    footer: { display: 'none' },          // duplicate Sign-up link + Clerk attribution — our .auth-swap owns the footer copy
+  },
+};
+
 
 export function Login() {
   const { go } = useStore();
@@ -24,11 +88,12 @@ export function Login() {
           signUpUrl="/signup"
           forceRedirectUrl="/dashboard"
           fallbackRedirectUrl="/dashboard"
+          appearance={CLERK_APPEARANCE}
         />
       </div>
       <p className="auth-swap">
         <span className="muted">Not by form?</span>{' '}
-        <span className="muted t-caption">Google and GitHub sign-in live in the panel above.</span>
+        <span className="muted t-caption">The one-tap Google button is at the top.</span>
       </p>
       <p className="auth-swap">
         <span className="muted">New to Scout?</span>{' '}
@@ -48,6 +113,7 @@ export function Signup() {
           signInUrl="/login"
           forceRedirectUrl="/onboarding"
           fallbackRedirectUrl="/onboarding"
+          appearance={CLERK_APPEARANCE}
         />
       </div>
       <p className="auth-swap">
