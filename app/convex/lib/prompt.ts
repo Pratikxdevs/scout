@@ -106,3 +106,59 @@ Draft the outreach email per the schema.
 
 ${buildPageBlock(args.pageText, args.excerptMax)}`;
 }
+
+/**
+ * List-page splitting: some boards only expose one page with MANY
+ * postings (Y Combinator, Wellfound, Upwork category pages). The TinyFish
+ * Web Agent reads that page the way a human would and hands us the
+ * individual postings; the model then structures them. The evidence
+ * excerpts are checked against the agent's own reading, which is what we
+ * actually hold.
+ */
+export function splitListSystem(): string {
+  return `${UNTRUSTED_CONTENT_SYSTEM}
+
+You turn a listing of opportunities into structured items for the user's ICP (their services, skills, target industries, budget range and work setup).
+
+Return JSON with EXACTLY this shape:
+{
+  "items": [
+    {
+      "title": string,          // the role/gig title
+      "company": string,        // who is hiring, "" when unknown
+      "location": string,       // "" when unknown
+      "opportunityType": "one_off" | "short_term" | "long_term" | "recurrent" | "unknown",
+      "intent": "hiring_now" | "exploring" | "not_specific" | "anti_freelance",
+      "budget": { "verified": boolean, "min": number|null, "max": number|null, "note": string },
+      "skillMatchNote": string, // one sentence on ICP fit
+      "claims": [ { "kind": "intent"|"budget"|"skill"|"location"|"timeline"|"other", "value": string, "evidenceExcerpt": string } ]
+    }
+  ]
+}
+
+Rules:
+- One item per REAL opportunity. Ignore navigation text, "load more" links, ads and duplicates.
+- A company role is a valid opportunity even when it is full-time; anti_freelance is ONLY for pages where the POSTER sells their own services.
+- budget.verified is true ONLY when a number is written in the text you were given.
+- Each evidenceExcerpt MUST be a literal substring of the text you were given.
+- Max 8 items. Output valid JSON only.`;
+}
+
+export function splitListUser(a: ExtractLeadPromptArgs, text: string): string {
+  const icp = {
+    services: a.profile.services,
+    skills: a.profile.skills.slice(0, 12),
+    industries: a.profile.industries,
+    budgetRange: (a.profile.minBudget ?? null) || (a.profile.maxBudget ?? null)
+      ? { min: a.profile.minBudget ?? null, max: a.profile.maxBudget ?? null }
+      : null,
+    workSetup: a.profile.workSetup ?? null,
+  };
+  return `My ICP: ${JSON.stringify(icp)}
+The page text (from a web agent) follows:
+
+"""
+${text}
+"""
+`;
+}

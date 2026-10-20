@@ -7,8 +7,10 @@ import type { Id } from '../_generated/dataModel';
 import { LIMITS } from '../lib/limits';
 import { excerptSupported, scoreLead, skillMatchRatio } from '../lib/scoring';
 import { completeJson, LlmError, llmKey } from '../providers/llm';
-import { extractLeadSystem, extractLeadUser } from '../lib/prompt';
+import { extractLeadSystem, extractLeadUser, splitListSystem, splitListUser } from '../lib/prompt';
 import { relativeDateIn } from '../lib/dates';
+import { isPostingUrl, resolveSources, type HuntSource } from '../lib/sources';
+import { runAgent } from '../providers/tinyfish';
 
 const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms));
 
@@ -50,6 +52,7 @@ export const qualifyRun = internalAction({
       return;
     }
 
+    const runSources = resolveSources(run.sources);
     const tasks = (await ctx.runQuery(internal.searchTasks.completedForRun, { runId: args.runId })) as Array<{
       _id: Id<'searchTasks'>; payload: { url: string }; result: { finalUrl: string; title: string; textExcerpt: string } | null;
     }>;
@@ -79,11 +82,39 @@ export const qualifyRun = internalAction({
     };
 
     let leadsWritten = 0;
+    let agentsUsed = 0;   // bounded agent spend per run
     // Per-page outcomes (honest bookkeeping): what was stored, and why the
     // rest were skipped. Surfaced in the activity log so an empty hunt is
     // explainable instead of mysterious.
     const outcomes: Array<{ url: string; outcome: string }> = [];
-    for (const t of pages) {
+    const pageBudget = LIMITS.QUALIFY.MAX_PAGES_PER_RUN;
+    const scored = pages.slice(0, pageBudget);
+    if (pages.length > scored.length) {
+      outcomes.push({ url: '', outcome: `${pages.length - scored.length} pages not scored (run budget)` });
+    }
+    for (const t of scored) {
+      // A board page that lists MANY opportunities is split by the TinyFish
+      // Web Agent into individual leads — the agent reads the page like a
+      // human, the model structures what it read.
+      const src = sourceFor(runSources, t.payload.url);
+      // Only a real board/index page is worth splitting — an individual
+      // posting from the same host is a normal single lead.
+      const isBoardPage = src !== null && src.listPage === true
+        && !isPostingUrl(t.payload.url, src);
+      if (isBoardPage && agentsUsed < LIMITS.AGENT.MAX_PER_RUN) {
+        try {
+          const split = await splitListPage(ctx, t, icp, run.userId, args.runId, src);
+          agentsUsed++;
+          leadsWritten += split.stored;
+          outcomes.push({ url: t.payload.url, outcome: `split into ${split.stored} lead${split.stored === 1 ? '' : 's'}` });
+          continue;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'unknown error';
+          outcomes.push({ url: t.payload.url, outcome: `split failed: ${msg.slice(0, 100)}` });
+          agentsUsed++;
+          continue;
+        }
+      }
       // Rate limits are the provider's, not the page's: a 429 waits and
       // retries (bounded), anything else fails the page honestly.
       let res: { ok: boolean; reason: string } | null = null;
@@ -95,7 +126,9 @@ export const qualifyRun = internalAction({
           const le = err instanceof LlmError ? err : null;
           const rateLimited = le !== null && (le.status === 429 || le.retryable);
           if (rateLimited && attempt < 2) {
-            await sleep(4_000 * (attempt + 1));
+            // Provider rate limit: back off properly (8s, 16s) instead of
+            // hammering it — the next key may also be limited.
+            await sleep(8_000 * (attempt + 1));
             continue;
           }
           const msg = err instanceof Error ? err.message : 'unknown error';
@@ -111,8 +144,9 @@ export const qualifyRun = internalAction({
       } else {
         outcomes.push({ url: t.payload.url, outcome: res.reason });
       }
-      // Gentle pacing so a burst of pages never trips the provider limit.
-      await sleep(700);
+      // Pacing: the provider's RPM limit is the real constraint, so pages
+      // are scored ~1.5s apart (with jitter) instead of back to back.
+      await sleep(1200 + Math.floor(Math.random() * 600));
     }
 
     await ctx.runMutation(internal.searchRuns.setResultCount, { runId: args.runId, resultCount: leadsWritten });
@@ -131,6 +165,102 @@ export const qualifyRun = internalAction({
     await ctx.runMutation(internal.searchRuns.setCompleted, { runId: args.runId });
   },
 });
+
+/** The source a URL belongs to (run-scoped). */
+function sourceFor(sources: readonly HuntSource[], url: string): HuntSource | null {
+  let host = '';
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+  for (const s of sources) {
+    if (s.hosts.some(h => host === h || host.endsWith('.' + h))) return s;
+  }
+  return null;
+}
+
+/**
+ * Split one list page into individual leads.
+ *
+ * The TinyFish Web Agent reads the page (goal-driven, like a human); the
+ * model then structures what the agent read, and every claim excerpt is
+ * verified against the agent's text — the evidence we actually hold.
+ */
+async function splitListPage(
+  ctx: ActionCtx,
+  task: { payload: { url: string }; result: { finalUrl: string; title: string; textExcerpt: string } },
+  icp: { services: string[]; skills: string[]; industries: string[]; minBudget: number | null; maxBudget: number | null; workSetup: string | null },
+  userId: string,
+  runId: Id<'searchRuns'>,
+  src: HuntSource,
+): Promise<{ stored: number }> {
+  const goal = `List the individual job postings on this page for a ${icp.services[0] ?? 'software'} freelancer. For each posting give the title, the hiring company, the location or remote status, and quote the exact sentence that states any pay, rate or budget.`;
+  const agentPage = await runAgent(task.payload.url, goal);
+  const read = agentPage.textMarkdown.slice(0, 12_000);
+  if (read.trim().length < 80) {
+    throw new Error('agent returned nothing readable');
+  }
+  const raw = await completeJson<{ items?: unknown }>(ctx, [
+    { role: 'system', content: splitListSystem() },
+    { role: 'user', content: splitListUser({ profile: icp, query: 'freelance work', excerptMax: 12_000 }, read) },
+  ], { maxTokens: 1600, reasoningEffort: 'low' });
+
+  const items = Array.isArray(raw?.items) ? raw.items : [];
+  let stored = 0;
+  for (const item of items.slice(0, 8)) {
+    if (typeof item !== 'object' || item === null) continue;
+    const it = item as Record<string, unknown>;
+    const title = u(it.title, 140);
+    if (title === '') continue;
+    const intent = INTENTS.has(String(it.intent)) ? String(it.intent) as 'hiring_now' | 'exploring' | 'anti_freelance' : 'not_specific';
+    const claims = (Array.isArray(it.claims) ? it.claims : [])
+      .filter(c => excerptSupported(read, typeof (c as Record<string, unknown>)?.evidenceExcerpt === 'string' ? String((c as Record<string, unknown>).evidenceExcerpt) : ''))
+      .slice(0, 5)
+      .map(c => {
+        const rec = c as Record<string, unknown>;
+        return {
+          kind: KINDS.has(String(rec.kind)) ? String(rec.kind) : 'other',
+          value: u(rec.value, 240),
+          evidenceExcerpt: u(rec.evidenceExcerpt, 300),
+          sourceUrl: task.payload.url,
+        };
+      });
+    if (claims.length === 0 && intent === 'not_specific') continue;
+    const budget = (typeof it.budget === 'object' && it.budget !== null) ? it.budget as Record<string, unknown> : {};
+    const budgetVerified = budget.verified === true && (numOrNull(budget.min) !== null || numOrNull(budget.max) !== null);
+    const score = scoreLead({
+      intent,
+      skillMatchRatio: skillMatchRatio(icp.skills, `${title} ${u(it.company, 120)} ${u(it.skillMatchNote, 300)} ${claims.map(c => c.value).join(' ')}`),
+      publishedAt: relativeDateIn(read),
+      budget: { verified: budgetVerified, min: numOrNull(budget.min), max: numOrNull(budget.max) },
+      icpBudget: { min: icp.minBudget, max: icp.maxBudget },
+      domain: hostname(task.payload.url),
+    });
+    await ctx.runMutation(internal.leads.upsert, {
+      userId,
+      runId,
+      canonicalUrl: new URL(task.payload.url).toString(),
+      url: task.payload.url,
+      title,
+      company: u(it.company, 120) || hostname(task.payload.url),
+      description: u(it.skillMatchNote, 600),
+      location: u(it.location, 120),
+      opportunityType: TYPES.has(String(it.opportunityType)) ? String(it.opportunityType) as 'one_off' | 'short_term' | 'long_term' | 'recurrent' : 'unknown',
+      intent,
+      budgetVerified,
+      budgetMin: numOrNull(budget.min) ?? undefined,
+      budgetMax: numOrNull(budget.max) ?? undefined,
+      budgetNote: budgetVerified ? u(budget.note, 80) : '',
+      publishedAt: relativeDateIn(read) ?? undefined,
+      score,
+      claims,
+    });
+    stored++;
+  }
+  void src;
+  return { stored };
+}
 
 async function qualifyOne(
   ctx: ActionCtx,

@@ -27,6 +27,11 @@ export const LIMITS = {
     MIN_USEFUL_TEXT: 400,
   },
   AGENT: { MAX_PER_RUN: 2, MAX_PROCESS_SECONDS: 120 },
+  QUALIFY: {
+    /** Pages scored (one LLM call each) per run — the provider's RPM and
+     *  the run's cost budget both live here. */
+    MAX_PAGES_PER_RUN: 12,
+  },
   PIPELINE: {
     /** Leads you may move to `contacted` per UTC day (caps meter truth). */
     CONTACT_CAP: 25,
