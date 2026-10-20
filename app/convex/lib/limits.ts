@@ -13,6 +13,8 @@ export const LIMITS = {
     MAX_QUERIES_PER_RUN: 3,
     /** Sources a single run may target (one scoped query each). */
     MAX_SOURCES_PER_RUN: 6,
+    /** Postings expanded from board-page links per run (one page each). */
+    MAX_EXPANDED_LINKS: 8,
     /** Attempts per task (B6). */
     MAX_ATTEMPTS: 2,
     /** Concurrent runs per user. */

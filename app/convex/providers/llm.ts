@@ -171,7 +171,7 @@ export async function completeJson<T>(
       if (le === null) throw e;
       // The model ran out of budget before emitting valid JSON: give it
       // more room once (and reason less), then give up honestly.
-      if (le.status === 400 && /json_validate_failed|Failed to validate JSON/i.test(le.message)) {
+      if (le.status === 400 && /json_validate_failed|failed_generation|Failed to (validate|generate) JSON/i.test(le.message)) {
         return await rotateKeys((apiKey) => call(apiKey, repair, model, maxTokens * 2, 'low'));
       }
       // Rate limited on every key: try the lighter model once. Same schema,

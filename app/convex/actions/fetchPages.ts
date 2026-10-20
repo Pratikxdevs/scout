@@ -6,7 +6,21 @@ import type { Id } from '../_generated/dataModel';
 import { LIMITS } from '../lib/limits';
 import { isAllowedFetchable, canonicalUrl } from '../lib/urls';
 import { fetchPages, runAgent, ProviderError } from '../providers/tinyfish';
-import { hostAllowed, resolveSources } from '../lib/sources';
+import { hostAllowed, isPostingUrl, resolveSources, type HuntSource } from '../lib/sources';
+
+/** The source a URL belongs to (run-scoped). */
+function sourceFor(sources: readonly HuntSource[], url: string): HuntSource | null {
+  let host = '';
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+  for (const s of sources) {
+    if (s.hosts.some(h => host === h || host.endsWith('.' + h))) return s;
+  }
+  return null;
+}
 
 /**
  * Fetch (SPEC §9): bounded batches (≤5 URLs/call, ≤4 batches/run), excerpt
@@ -26,6 +40,11 @@ export const processFetchBatches = internalAction({
     let agentsUsed = 0;
     let lastError: string | null = null;
     const failures: string[] = [];
+    // Board pages (Upwork categories, YC, Wellfound) list the postings as
+    // LINKS. We expand them into real fetch tasks — one page per posting —
+    // instead of burning an agent run to read the list.
+    const expanded: { url: string; canonicalUrl: string; title?: string }[] = [];
+    const seenUrls = new Set<string>();
 
     for (let batchNo = 0; batchNo < LIMITS.SEARCH.MAX_BATCHES_PER_RUN; batchNo++) {
       const still = await ctx.runQuery(internal.searchRuns.getInternal, { runId: args.runId });
@@ -37,6 +56,7 @@ export const processFetchBatches = internalAction({
       })) as Claimed[];
       if (claimed.length === 0) break;
 
+      for (const c of claimed) seenUrls.add(c.payload.url);
       const urls = claimed.map(c => c.payload.url)
         .filter(u => isAllowedFetchable(u))
         .filter(u => hostAllowed(u, sources));
@@ -58,6 +78,20 @@ export const processFetchBatches = internalAction({
           const raw = c.payload.url;
           const page = byUrl.get(raw);
           if (page !== undefined) {
+            // Board page → the postings are its links.
+            const src = sourceFor(sources, raw);
+            if (src !== null && src.listPage === true && expanded.length < LIMITS.SEARCH.MAX_EXPANDED_LINKS) {
+              for (const link of page.links) {
+                if (expanded.length >= LIMITS.SEARCH.MAX_EXPANDED_LINKS) break;
+                if (!isAllowedFetchable(link)) continue;
+                if (!hostAllowed(link, sources)) continue;
+                if (!isPostingUrl(link, src)) continue;
+                const cu = canonicalUrl(link);
+                if (cu === null || seenUrls.has(cu)) continue;
+                seenUrls.add(cu);
+                expanded.push({ url: link, canonicalUrl: cu });
+              }
+            }
             const stored = canonicalUrl(page.finalUrl) ?? page.finalUrl;
             let text = page.textMarkdown;
             // Agent fallback for thin pages: content behind JS walls,
@@ -106,6 +140,19 @@ export const processFetchBatches = internalAction({
           await ctx.runMutation(internal.searchTasks.failOrRequeue, { taskId: c._id, error: message });
         }
       }
+    }
+
+    if (expanded.length > 0) {
+      await ctx.runMutation(internal.searchTasks.enqueueFetch, {
+        runId: args.runId,
+        userId: run.userId,
+        tasks: expanded.map(e => ({ url: e.url, canonicalUrl: e.canonicalUrl, title: e.title })),
+      });
+      await ctx.runMutation(internal.activityLogs.record, {
+        userId: run.userId, searchRunId: args.runId, eventType: 'urls_discovered',
+        message: `Expanded ${expanded.length} posting${expanded.length === 1 ? '' : 's'} from board pages`,
+        metadata: { expanded: expanded.length },
+      });
     }
 
     await ctx.runMutation(internal.activityLogs.record, {

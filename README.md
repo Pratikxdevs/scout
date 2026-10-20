@@ -33,7 +33,12 @@ TinyFish is not a token mention in Scout. It is the only thing that lets Scout r
 | **Thin-page fallback** | `POST agent.tinyfish.ai/v1/automation/run` | When a board renders client-side (or blocks plain fetch), a goal-driven Web Agent reads it like a human: *"list 3 job titles with their location"* | ✅ 7-step agent run on LinkedIn, ~85s, inside our 120s cap |
 | **List-page splitter** | `POST agent.tinyfish.ai/v1/automation/run` | Boards that only expose *index* pages (Upwork categories, Y Combinator, Wellfound) are read by the Web Agent and split into **N individual leads**, each with its own evidence excerpt — the scraper replacement | ✅ 9 Upwork board pages → 9 individual gigs in one run |
 | **List-page splitter** | `POST agent.tinyfish.ai/v1/automation/run` | Boards that only expose *index* pages (Upwork categories, Y Combinator, Wellfound) are read by the Web Agent and split into **N individual leads**, each with its own evidence excerpt — the scraper replacement | ✅ 9 Upwork board pages → 9 individual gigs in one run |
-| *(next)* | Browser Infrastructure | Cloud browsers for the boards that need a real session (LinkedIn/Naukri) | planned for the finale |
+| **Anti-bot + geo** | `browser_profile: "stealth"`, `proxy_config.country_code` | The agent runs in stealth mode and (optionally) from the ICP's country — the boards that block plain fetches still answer | ✅ stealth agent run on Lever, geo-ready |
+| **Intent + scoping** | `purpose`, `include_domains`, `location` | The provider is told *why* we're searching and exactly which domains are in scope, instead of relying on `site:` parsing | ✅ verified: `include_domains` ORs across hosts |
+| **Freshness from the index** | `results[].date` | The search index knows the age ("2 days ago") — the freshness score comes from the index, not a model's guess | ✅ |
+| **Link expansion** | Fetch `links: true` | On a board page the *links are the postings* — we fetch each one, so a category page becomes N real leads | ✅ 9 Upwork links → 9 gigs |
+| *(next)* | Browser Context Profiles / Vault | Reuse a captured login for the boards that need a session (LinkedIn, Naukri) | needs a one-time sign-in |
+| *(next)* | Monitor API | Saved searches as scheduled topic/page monitors | planned |
 
 **Why this is the right tool, not a convenient one:** freelance boards have no public API, block scrapers, and change markup weekly. TinyFish gives us a *search* layer (find candidate pages) and a *reading* layer (get clean content) that stays working without maintaining scrapers — which is exactly why a solo team can ship this in a day.
 
@@ -217,6 +222,8 @@ VITE_CLERK_PUBLISHABLE_KEY=pk_test_…      # never a secret key
 - **ATS sources** — Greenhouse/Lever/Ashby/Workable/Recruitee/Teamtailor pages fetched at 2–9K chars with locations, employment types and stated rates ("PLN 110 – PLN 160 per hour")
 - **Web Agent splitter** — 9 Upwork board pages → 9 individual gigs, each with its own evidence excerpts
 - **Yield after tuning** — 14 pages → 14 leads (100% conversion) once company roles stopped being misread as "not a freelance gig"
+- **Fair budgets** — hits are harvested round-robin across sources, so one chatty board can never starve the other five (verified: all six sources represented in a single run)
+- **Cost shape** — Search is free to 12,000 req/day and Fetch to 1,000 URLs/day; the wallet only funds what exceeds that (Agent runs are the pricey part, bounded to 2/run)
 - **ATS sources** — Greenhouse/Lever/Ashby/Workable/Recruitee/Teamtailor job pages fetched at 2–9K chars with locations, employment types and stated rates ("PLN 110 – PLN 160 per hour")
 - **Web Agent splitter** — 9 Upwork board pages → 9 individual gigs with their own evidence excerpts
 - **Yield after tuning** — 14 pages → 14 leads (100% conversion) once company roles stopped being misread as "not freelance"

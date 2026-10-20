@@ -1,6 +1,7 @@
 "use node";
 import { LIMITS } from '../lib/limits';
 import { isAllowedFetchable } from '../lib/urls';
+import { relativeDateIn } from '../lib/dates';
 
 /**
  * TinyFish adapters (SPEC §5): Search, Fetch, Agent.
@@ -17,6 +18,9 @@ import { isAllowedFetchable } from '../lib/urls';
 const SEARCH_ENDPOINT = 'https://api.search.tinyfish.ai';
 const FETCH_ENDPOINT = 'https://api.fetch.tinyfish.ai';
 const AGENT_RUN_ENDPOINT = 'https://agent.tinyfish.ai/v1/automation/run';
+
+/** Why we fetch — the provider uses the intent to sharpen extraction. */
+const FETCH_PURPOSE = 'Extract the job posting details, stated pay and location for a freelance lead database';
 
 /* ---------- key pool (cycled per call, rotates again on 429) ---------- */
 
@@ -116,16 +120,43 @@ type SearchResponseShape = {
 };
 
 /** GET search — SERP enrichment for query planning (≤ provider cap). */
+export interface SearchOptions {
+  /** Restrict results to these domains (the provider ORs them). */
+  includeDomains?: string[];
+  excludeDomains?: string[];
+  /** Why we are searching — the provider uses it to sharpen relevance. */
+  purpose?: string;
+  /** Freshness window in minutes (1 … 5,256,000). */
+  recencyMinutes?: number;
+  /** Country code for geo-targeted results (e.g. 'IN', 'US'). */
+  location?: string | null;
+  language?: string;
+}
+
 export async function searchWeb(
   query: string,
-  opts: { excludeDomains?: string[] } = {},
+  opts: SearchOptions = {},
 ): Promise<SearchOutcome> {
   return rotateKeys(async (apiKey) => {
     const url = new URL(SEARCH_ENDPOINT);
     url.searchParams.set('query', query);
+    if (opts.includeDomains !== undefined && opts.includeDomains.length > 0) {
+      url.searchParams.set('include_domains', opts.includeDomains.slice(0, 10).join(','));
+    }
     if (opts.excludeDomains !== undefined && opts.excludeDomains.length > 0) {
-      // Provider may cap domains; batches beyond the cap are dropped here.
-      url.searchParams.set('excludeDomains', opts.excludeDomains.slice(0, 10).join(','));
+      url.searchParams.set('exclude_domains', opts.excludeDomains.slice(0, 10).join(','));
+    }
+    if (opts.purpose !== undefined && opts.purpose.trim() !== '') {
+      url.searchParams.set('purpose', opts.purpose.trim().slice(0, 500));
+    }
+    if (opts.recencyMinutes !== undefined && opts.recencyMinutes > 0) {
+      url.searchParams.set('recency_minutes', String(Math.round(opts.recencyMinutes)));
+    }
+    if (opts.location !== undefined && opts.location !== null && opts.location.trim() !== '') {
+      url.searchParams.set('location', opts.location.trim().slice(0, 4));
+    }
+    if (opts.language !== undefined && opts.language.trim() !== '') {
+      url.searchParams.set('language', opts.language.trim().slice(0, 4));
     }
     const res = await fetch(url, {
       method: 'GET',
@@ -147,11 +178,13 @@ export async function searchWeb(
       const rawUrl = typeof r.url === 'string' ? r.url : '';
       if (!isAllowedFetchable(rawUrl)) continue;   // SSRF gate at discovery too
       const dateRaw = typeof r.date === 'string' ? r.date : typeof r.published_date === 'string' ? r.published_date : null;
+      // The index knows the age ("2 days ago") or the date — use it instead of
+      // asking a model to guess a freshness number.
       hits.push({
         url: rawUrl,
         title: typeof r.title === 'string' ? r.title : rawUrl.slice(0, 90),
         snippet: typeof r.snippet === 'string' ? r.snippet.replace(/\s+/g, ' ').slice(0, 400) : '',
-        publishedAt: dateRaw === null ? null : toTs(dateRaw),
+        publishedAt: dateRaw === null ? null : (toTs(dateRaw) ?? relativeDateIn(dateRaw)),
       });
     }
     return { query, hits };
@@ -171,6 +204,16 @@ export interface FetchedPage {
   title: string;
   description: string;
   textMarkdown: string;      // clamped to excerpt budget
+  /** Every <a href> on the page (when links: true) — on a board page these
+   *  ARE the individual postings. */
+  links: string[];
+  /** The page's own publication date, when the provider detected one. */
+  publishedAt: number | null;
+  /** Validators for conditional refetches (skip unchanged pages). */
+  etag: string | null;
+  lastModified: string | null;
+  /** Structured payload (agent runs with output_schema). */
+  structured?: unknown | null;
 }
 
 const vStr = (x: unknown, max: number, fallback = ''): string =>
@@ -188,8 +231,21 @@ export async function fetchPages(
     const res = await fetch(FETCH_ENDPOINT, {
       method: 'POST',
       headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ urls, ttl: 0, format: 'markdown' }),
-      signal: AbortSignal.timeout(60_000),
+      body: JSON.stringify({
+        urls,
+        ttl: 0,                      // prefer live
+        format: 'markdown',
+        links: true,                 // board pages: the links ARE the postings
+        purpose: FETCH_PURPOSE,
+        // Boilerplate costs tokens and muddies evidence — drop it before
+        // the text reaches the model.
+        exclude_selectors: ['.comments', '.newsletter-signup', '.sidebar', 'nav', 'footer', 'header', 'aside', 'script', 'style'],
+        per_url_timeout_ms: 100_000,
+        include_etag_and_last_modified: true,
+      }),
+      // The provider allows 110s per URL and a 120s batch ceiling — give the
+      // client room to receive clean errors instead of cutting the request.
+      signal: AbortSignal.timeout(150_000),
     }).catch((e: unknown) => {
       if (e instanceof Error && e.name === 'TimeoutError') {
         throw new ProviderError({ message: 'TinyFish fetch timed out (60s)', retryable: true });
@@ -200,8 +256,8 @@ export async function fetchPages(
       throw classify(res.status, `fetch ${await readErrorBody(res)}`);
     }
     const body = (await res.json()) as {
-      results?: Array<{ url?: unknown; final_url?: unknown; title?: unknown; description?: unknown; text?: unknown; markdown?: unknown; content?: unknown }>;
-      errors?: Array<{ url?: unknown; error?: unknown; message?: unknown }>;
+      results?: Array<{ url?: unknown; final_url?: unknown; title?: unknown; description?: unknown; text?: unknown; markdown?: unknown; content?: unknown; links?: unknown; published_date?: unknown; etag?: unknown; last_modified?: unknown }>;
+      errors?: Array<{ url?: unknown; error?: unknown; message?: unknown; status?: unknown }>;
     };
     const pages: FetchedPage[] = [];
     for (const p of body.results ?? []) {
@@ -210,12 +266,21 @@ export async function fetchPages(
       // Redirect re-check (SPEC §9): final_url passes the same gate.
       if (!isAllowedFetchable(finalUrl)) continue;
       const text = firstString(p.markdown, p.content, p.text);
+      const links = Array.isArray(p.links)
+        ? p.links.filter((l): l is string => typeof l === 'string').slice(0, 120)
+        : [];
+      const dateRaw = typeof p.published_date === 'string' ? p.published_date : null;
       pages.push({
         url: rawUrl,
         finalUrl,
         title: vStr(p.title, 140),
         description: vStr(p.description, 300),
         textMarkdown: text.slice(0, LIMITS.PAGE.MAX_EXCERPT_CHARS),
+        links,
+        publishedAt: dateRaw === null ? null : (toTs(dateRaw) ?? relativeDateIn(dateRaw)),
+        etag: typeof p.etag === 'string' ? p.etag : null,
+        lastModified: typeof p.last_modified === 'string' ? p.last_modified : null,
+        structured: null,
       });
     }
     const errors = (body.errors ?? [])
@@ -268,6 +333,11 @@ export async function runAgent(
       return '';
     };
     const text = firstText(body.result, body.output, nested?.result, body.message);
+    // With output_schema the provider returns the PARSED OBJECT as `result`
+    // instead of nested text — keep it so callers can use it directly.
+    const structured = (typeof body.result === 'object' && body.result !== null && typeof nested?.result !== 'string')
+      ? body.result
+      : null;
     const agentErr = body.error ?? nested?.error;
     const failed = z(body.status).toLowerCase() === 'failed'
       || text === ''
@@ -276,7 +346,18 @@ export async function runAgent(
       const why = typeof agentErr === 'string' && agentErr !== '' ? `TinyFish agent errored: ${agentErr.slice(0, 160)}` : 'TinyFish agent returned no usable page content';
       throw new ProviderError({ message: why, retryable: false });
     }
-    return { url, finalUrl: url, title: `Agent: ${goal.slice(0, 60)}`, description: '', textMarkdown: text.slice(0, LIMITS.PAGE.MAX_EXCERPT_CHARS) };
+    return {
+      url,
+      finalUrl: url,
+      title: `Agent: ${goal.slice(0, 60)}`,
+      description: '',
+      textMarkdown: text.slice(0, LIMITS.PAGE.MAX_EXCERPT_CHARS),
+      links: [],
+      publishedAt: null,
+      etag: null,
+      lastModified: null,
+      structured,
+    };
   });
 }
 

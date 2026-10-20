@@ -5,7 +5,7 @@ import { internal } from '../_generated/api';
 import { canonicalUrl } from '../lib/urls';
 import { LIMITS } from '../lib/limits';
 import { searchWeb, toProviderError } from '../providers/tinyfish';
-import { hostAllowed, isPostingUrl, resolveSources } from '../lib/sources';
+import { countryCode, hostAllowed, isPostingUrl, resolveSources } from '../lib/sources';
 import { planQueries } from '../lib/planner';
 
 /** Query planner lives at the bottom of this module — deterministic. */
@@ -19,19 +19,34 @@ export const startSearch = internalAction({
     await ctx.runMutation(internal.searchRuns.setRunning, { runId: args.runId });
 
     const profile = await ctx.runQuery(internal.profiles.rowFor, { userId: run.userId }) as
-      { services?: string[]; industries?: string[]; keywords?: string[] } | null;
+      { services?: string[]; industries?: string[]; keywords?: string[]; country?: string } | null;
     const sources = resolveSources(run.sources).slice(0, LIMITS.SEARCH.MAX_SOURCES_PER_RUN);
     const plan = planQueries(run.query, profile, sources);
     await ctx.runMutation(internal.searchRuns.setPlanned, { runId: args.runId, plannedQueries: plan });
 
     // Provider per planner query; one retry per query on transient errors.
     const candidates = new Map<string, { url: string; title: string; publishedAt: number | null }>();
+    const buckets: Array<Array<{ url: string; title: string; publishedAt: number | null }>> = [];
     const failures: string[] = [];
     let dropped = 0;   // hits that were not a single opportunity
+    // Geo-targeting is opt-in per source: a board like Naukri is
+    // country-specific, but a global ATS board must NOT be filtered to the
+    // user's country (freelancers work across borders).
+    const icpCountry = countryCode(profile?.country);
+    const purpose = `Find open ${(profile?.services?.[0] ?? 'freelance')} opportunities with their pay and location`;
     for (const [idx, planQuery] of plan.entries()) {
+      const src = sources[idx];
       for (let attempt = 0; attempt <= 1; attempt++) {
         try {
-          const { hits } = await searchWeb(planQuery);
+          const { hits } = await searchWeb(planQuery, {
+            // Dedicated domain filter (the query's `site:` form is deprecated)
+            includeDomains: src?.hosts,
+            purpose,
+            location: src?.countryScoped === true ? icpCountry : null,
+          });
+          // Hits are bucketed per source and harvested round-robin later, so
+          // one chatty source can never eat the whole run budget.
+          const bucket: { url: string; title: string; publishedAt: number | null }[] = [];
           for (const h of hits) {
             const cu = canonicalUrl(h.url) ?? '';
             if (cu === '' || !cu.startsWith('https://')) continue;
@@ -39,11 +54,13 @@ export const startSearch = internalAction({
             if (!hostAllowed(h.url, sources)) continue;
             // …and only pages that ARE one opportunity: board home pages,
             // company landing pages and locale-prefixed dead paths are dropped.
-            const src = sources.find(s => hostAllowed(h.url, [s]));
-            if (src !== undefined && !isPostingUrl(h.url, src)) { dropped++; continue; }
-            if (candidates.size >= LIMITS.SEARCH.MAX_URLS_PER_RUN) break;
-            if (!candidates.has(cu)) candidates.set(cu, { url: h.url, title: h.title, publishedAt: h.publishedAt });
+            const owner = sources.find(s => hostAllowed(h.url, [s]));
+            if (owner !== undefined && !isPostingUrl(h.url, owner)) { dropped++; continue; }
+            if (!candidates.has(cu) && !bucket.some(b => b.url === cu)) {
+              bucket.push({ url: h.url, title: h.title, publishedAt: h.publishedAt });
+            }
           }
+          buckets.push(bucket);
           break; // this planner query worked — no retry needed
         } catch (err) {
           const pe = toProviderError(err);
@@ -54,6 +71,24 @@ export const startSearch = internalAction({
           await sleep(2000 * (idx + 1));   // gentle jittered backoff
         }
       }
+    }
+
+    // Round-robin across sources: every selected source gets a fair share of
+    // the run's URL budget before any source can take the rest.
+    let round = 0;
+    let exhausted = false;
+    while (!exhausted && candidates.size < LIMITS.SEARCH.MAX_URLS_PER_RUN) {
+      exhausted = true;
+      for (const bucket of buckets) {
+        if (candidates.size >= LIMITS.SEARCH.MAX_URLS_PER_RUN) break;
+        const item = bucket[round];
+        if (item === undefined) continue;
+        exhausted = false;
+        const cu = canonicalUrl(item.url) ?? '';
+        if (cu === '' || candidates.has(cu)) continue;
+        candidates.set(cu, item);
+      }
+      round += 1;
     }
 
     if (candidates.size === 0) {

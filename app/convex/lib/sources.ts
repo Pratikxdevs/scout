@@ -36,6 +36,8 @@ export interface HuntSource {
   kind: 'freelance' | 'jobs';
   /** Host exposes list pages only — the agent splitter turns one into N leads. */
   listPage?: boolean;
+  /** Board is country-specific (geo-targeted searches only make sense here). */
+  countryScoped?: boolean;
 }
 
 /* ------------------------------- ATS ------------------------------- */
@@ -62,7 +64,7 @@ const BOARD_SOURCES: readonly HuntSource[] = [
   { key: 'freelancer', label: 'Freelancer', family: 'marketplace', scope: 'site:freelancer.com/projects', hosts: ['freelancer.com'], postingPaths: ['/projects/'], queryHint: 'looking for', kind: 'freelance' },
   { key: 'remoteok', label: 'Remote OK', family: 'board', scope: 'site:remoteok.com', hosts: ['remoteok.com'], postingPaths: ['/remote-jobs/'], queryHint: 'remote', kind: 'jobs' },
   { key: 'linkedin', label: 'LinkedIn', family: 'board', scope: 'site:linkedin.com/jobs/view', hosts: ['linkedin.com'], postingPaths: ['/jobs/view/'], queryHint: '', kind: 'jobs' },
-  { key: 'naukri', label: 'Naukri', family: 'board', scope: 'site:naukri.com/job-listings', hosts: ['naukri.com'], postingPaths: ['/job-listings'], queryHint: '', kind: 'jobs' },
+  { key: 'naukri', label: 'Naukri', family: 'board', scope: 'site:naukri.com/job-listings', hosts: ['naukri.com'], postingPaths: ['/job-listings'], queryHint: '', kind: 'jobs', countryScoped: true },
   { key: 'ycombinator', label: 'Y Combinator', family: 'board', scope: 'site:ycombinator.com/jobs', hosts: ['ycombinator.com'], postingPaths: [], queryHint: '', kind: 'jobs', listPage: true },
   { key: 'wellfound', label: 'Wellfound', family: 'board', scope: 'site:wellfound.com/jobs', hosts: ['wellfound.com'], postingPaths: [], queryHint: '', kind: 'jobs', listPage: true },
   { key: 'weworkremotely', label: 'We Work Remotely', family: 'board', scope: 'site:weworkremotely.com/remote-jobs', hosts: ['weworkremotely.com'], postingPaths: [], queryHint: '', kind: 'jobs', listPage: true },
@@ -181,4 +183,30 @@ export function isPostingUrl(url: string, source: HuntSource): boolean {
     return path.split('/').filter(Boolean).length >= 2;
   }
   return source.postingPaths.some(p => path.includes(p));
+}
+
+/* ------------------------- geo targeting ------------------------- */
+
+/** Country name → ISO code for the Search API's `location` parameter.
+ *  Small, explicit map: the provider wants a two-letter code. */
+const COUNTRY_CODES: Record<string, string> = {
+  india: 'IN', 'united states': 'US', usa: 'US', 'united kingdom': 'GB', uk: 'GB',
+  germany: 'DE', france: 'FR', canada: 'CA', australia: 'AU', spain: 'ES',
+  brazil: 'BR', netherlands: 'NL', singapore: 'SG', 'united arab emirates': 'AE',
+  'south africa': 'ZA', ireland: 'IE', sweden: 'SE', poland: 'PL', italy: 'IT',
+  switzerland: 'CH', portugal: 'PT', japan: 'JP', china: 'CN',
+  uae: 'AE', 'new zealand': 'NZ', israel: 'IL', kenya: 'KE', nigeria: 'NG',
+  pakistan: 'PK', bangladesh: 'BD', 'sri lanka': 'LK', nepal: 'NP', mexico: 'MX',
+  argentina: 'AR', colombia: 'CO', vietnam: 'VN', philippines: 'PH',
+  indonesia: 'ID', malaysia: 'MY', thailand: 'TH', turkey: 'TR', ukraine: 'UA',
+  romania: 'RO', greece: 'GR', austria: 'AT', denmark: 'DK',
+  finland: 'FI', norway: 'NO', belgium: 'BE', czechia: 'CZ', hungary: 'HU',
+};
+
+export function countryCode(name: string | undefined | null): string | null {
+  if (name === undefined || name === null) return null;
+  const v = name.trim();
+  if (v === '') return null;
+  if (/^[A-Za-z]{2}$/.test(v)) return v.toUpperCase();
+  return COUNTRY_CODES[v.toLowerCase()] ?? null;
 }
