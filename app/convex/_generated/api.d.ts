@@ -17,6 +17,7 @@ import type * as activityLogs from "../activityLogs.js";
 import type * as leads from "../leads.js";
 import type * as lib_actor from "../lib/actor.js";
 import type * as lib_aiProfile from "../lib/aiProfile.js";
+import type * as lib_dates from "../lib/dates.js";
 import type * as lib_docxText from "../lib/docxText.js";
 import type * as lib_errors from "../lib/errors.js";
 import type * as lib_jsonFields from "../lib/jsonFields.js";
@@ -55,6 +56,7 @@ declare const fullApi: ApiFromModules<{
   leads: typeof leads;
   "lib/actor": typeof lib_actor;
   "lib/aiProfile": typeof lib_aiProfile;
+  "lib/dates": typeof lib_dates;
   "lib/docxText": typeof lib_docxText;
   "lib/errors": typeof lib_errors;
   "lib/jsonFields": typeof lib_jsonFields;

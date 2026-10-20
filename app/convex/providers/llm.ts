@@ -98,7 +98,7 @@ function isReasoningModel(model: string, base: string): boolean {
 export async function completeJson<T>(
   ctx: ActionCtx,
   messages: ChatMessage[],
-  opts: { maxTokens: number; temperature?: number },
+  opts: { maxTokens: number; temperature?: number; reasoningEffort?: string },
 ): Promise<T> {
   const key = llmKey(ctx);
   if (key === null) throw new LlmError('LLM_API_KEY is not set on this Convex deployment', false);
@@ -107,18 +107,26 @@ export async function completeJson<T>(
   const reasoning = isReasoningModel(model, base);
   const envTemp = envNumber('LLM_TEMPERATURE');
   const envTopP = envNumber('LLM_TOP_P');
-  const effort = process.env.LLM_REASONING_EFFORT ?? '';
+  const effort = opts.reasoningEffort ?? process.env.LLM_REASONING_EFFORT ?? '';
   // Reasoning models must run at temperature 1; other models keep the
   // caller's value, falling back to the deployment default.
   const temperature = reasoning ? (envTemp ?? 1) : (opts.temperature ?? envTemp ?? 0.2);
   const topP = envTopP ?? (reasoning ? 1 : undefined);
   // Reasoning models spend part of the budget on thinking: too small a cap
   // and the model never reaches valid JSON (Groq: "json_validate_failed").
-  const maxTokens = reasoning ? Math.max(opts.maxTokens, 1024) : opts.maxTokens;
+  // Long pages reason longer, so the floor is generous and a failed JSON
+  // validation is retried once with double the budget (see attempt()).
+  const maxTokens = reasoning ? Math.max(opts.maxTokens, 2048) : opts.maxTokens;
 
   const fallbackModel = process.env.LLM_FALLBACK_MODEL ?? 'openai/gpt-oss-20b';
 
-  const call = async (apiKey: string, repair: string | null, useModel: string = model): Promise<unknown> => {
+  const call = async (
+    apiKey: string,
+    repair: string | null,
+    useModel: string = model,
+    budget: number = maxTokens,
+    useEffort: string = effort,
+  ): Promise<unknown> => {
     const msgList: Array<{ role: string; content: string }> = repair
       ? [...messages, { role: 'assistant' as const, content: 'Previous reply was not valid JSON.' }, { role: 'user' as const, content: repair }]
       : messages;
@@ -128,10 +136,10 @@ export async function completeJson<T>(
       temperature,
       response_format: { type: 'json_object' },
     };
-    if (reasoning) body.max_completion_tokens = maxTokens;
-    else body.max_tokens = maxTokens;
+    if (reasoning) body.max_completion_tokens = budget;
+    else body.max_tokens = budget;
     if (topP !== undefined) body.top_p = topP;
-    if (effort.trim() !== '') body.reasoning_effort = effort.trim();
+    if (useEffort.trim() !== '') body.reasoning_effort = useEffort.trim();
 
     const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
@@ -159,11 +167,17 @@ export async function completeJson<T>(
     try {
       return await rotateKeys((apiKey) => call(apiKey, repair));
     } catch (e) {
+      const le = e instanceof LlmError ? e : null;
+      if (le === null) throw e;
+      // The model ran out of budget before emitting valid JSON: give it
+      // more room once (and reason less), then give up honestly.
+      if (le.status === 400 && /json_validate_failed|Failed to validate JSON/i.test(le.message)) {
+        return await rotateKeys((apiKey) => call(apiKey, repair, model, maxTokens * 2, 'low'));
+      }
       // Rate limited on every key: try the lighter model once. Same schema,
       // same parser — the caller never sees a degraded shape, only a
       // completed page.
-      const le = e instanceof LlmError ? e : null;
-      if (le !== null && le.status === 429 && fallbackModel !== '' && fallbackModel !== model) {
+      if (le.status === 429 && fallbackModel !== '' && fallbackModel !== model) {
         return await rotateKeys((apiKey) => call(apiKey, repair, fallbackModel));
       }
       throw e;

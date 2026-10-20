@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowUpIcon } from '@heroicons/react/24/outline';
 import { useStore } from '../../store';
 import { CHIP_DOT, SEARCH_CHIPS, toggleChipToken } from '../../lib/searchChips';
-import { SOURCES } from '../../../convex/lib/sources';
+import { SOURCES, WATCHLIST, type HuntSource } from '../../../convex/lib/sources';
 
 function DocMark() {
   return (
@@ -27,6 +27,16 @@ function DocMark() {
  * - chips toggle space-separated tokens, aria-pressed reflects state
  * - submit disabled when empty; maps query to feed filters via setSearch + go('jobs')
  */
+/** Picker groups: freelance first, then ATS, then the company watchlist. */
+const GROUPS: readonly { label: string; items: readonly HuntSource[] }[] = [
+  { label: 'Freelance & boards', items: SOURCES.filter(s => s.family === 'community' || s.family === 'board' || s.family === 'marketplace') },
+  { label: 'ATS career pages', items: SOURCES.filter(s => s.family === 'ats') },
+  { label: 'Companies to watch', items: WATCHLIST.map(w => ({
+    key: w.key, label: w.label, family: 'ats' as const, scope: `site:${w.host}/${w.slug}`,
+    hosts: [w.host], postingPaths: [], queryHint: '', kind: 'jobs' as const,
+  })) },
+];
+
 export function SearchHome() {
   const { setSearch, go, huntSources, toggleHuntSource } = useStore();
   const [q, setQ] = useState('');
@@ -98,28 +108,33 @@ export function SearchHome() {
       </div>
 
       {/* Where the hunt looks — one scoped search per source (TinyFish
-          `site:` scope). Toggle freely; the next hunt uses what's on. */}
+          `site:` scope). Toggle freely (max 6); the next hunt uses what's on. */}
       <div style={{ display: 'grid', gap: 8, justifyItems: 'center', marginTop: 18 }}>
         <p className="muted t-caption" style={{ margin: 0 }}>
           Where to hunt{huntSources.length > 0 ? ` — ${huntSources.length} source${huntSources.length === 1 ? '' : 's'}` : ' — whole web'}
         </p>
-        <div className="search-chips" role="group" aria-label="Hunt sources">
-          {SOURCES.map(s => {
-            const on = huntSources.includes(s.key);
-            return (
-              <button
-                key={s.key}
-                onClick={() => toggleHuntSource(s.key)}
-                aria-pressed={on}
-                className="search-chip"
-                data-on={on}
-                title={`${s.label} — ${s.kind === 'jobs' ? 'job boards' : 'freelance marketplaces'}`}
-              >
-                {s.label}
-              </button>
-            );
-          })}
-        </div>
+        {GROUPS.map(g => (
+          <div key={g.label} style={{ display: 'grid', gap: 6, justifyItems: 'center' }}>
+            <p className="t-micro muted" style={{ margin: 0, letterSpacing: '.08em', textTransform: 'uppercase' }}>{g.label}</p>
+            <div className="search-chips" role="group" aria-label={`${g.label} sources`}>
+              {g.items.map(s => {
+                const on = huntSources.includes(s.key);
+                return (
+                  <button
+                    key={s.key}
+                    onClick={() => toggleHuntSource(s.key)}
+                    aria-pressed={on}
+                    className="search-chip"
+                    data-on={on}
+                    title={s.kind === 'jobs' ? 'Job postings' : 'Freelance gigs'}
+                  >
+                    {s.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
       </div>
     </div>

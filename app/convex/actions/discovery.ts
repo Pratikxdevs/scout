@@ -5,7 +5,7 @@ import { internal } from '../_generated/api';
 import { canonicalUrl } from '../lib/urls';
 import { LIMITS } from '../lib/limits';
 import { searchWeb, toProviderError } from '../providers/tinyfish';
-import { hostAllowed, resolveSources } from '../lib/sources';
+import { hostAllowed, isPostingUrl, resolveSources } from '../lib/sources';
 import { planQueries } from '../lib/planner';
 
 /** Query planner lives at the bottom of this module — deterministic. */
@@ -27,6 +27,7 @@ export const startSearch = internalAction({
     // Provider per planner query; one retry per query on transient errors.
     const candidates = new Map<string, { url: string; title: string; publishedAt: number | null }>();
     const failures: string[] = [];
+    let dropped = 0;   // hits that were not a single opportunity
     for (const [idx, planQuery] of plan.entries()) {
       for (let attempt = 0; attempt <= 1; attempt++) {
         try {
@@ -36,6 +37,10 @@ export const startSearch = internalAction({
             if (cu === '' || !cu.startsWith('https://')) continue;
             // A scoped run only surfaces pages from the sources it targeted.
             if (!hostAllowed(h.url, sources)) continue;
+            // …and only pages that ARE one opportunity: board home pages,
+            // company landing pages and locale-prefixed dead paths are dropped.
+            const src = sources.find(s => hostAllowed(h.url, [s]));
+            if (src !== undefined && !isPostingUrl(h.url, src)) { dropped++; continue; }
             if (candidates.size >= LIMITS.SEARCH.MAX_URLS_PER_RUN) break;
             if (!candidates.has(cu)) candidates.set(cu, { url: h.url, title: h.title, publishedAt: h.publishedAt });
           }
@@ -77,8 +82,9 @@ export const startSearch = internalAction({
     });
     await ctx.runMutation(internal.activityLogs.record, {
       userId: run.userId, searchRunId: args.runId, eventType: 'urls_discovered',
-      message: `Found ${candidates.size} candidate page${candidates.size === 1 ? '' : 's'}`,
-      metadata: { queries: plan },
+      message: `Found ${candidates.size} candidate page${candidates.size === 1 ? '' : 's'}`
+        + (dropped > 0 ? ` (${dropped} skipped — not a single posting)` : ''),
+      metadata: { queries: plan, dropped },
     });
 
     // Handoff: batches processed by the fetch action.

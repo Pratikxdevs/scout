@@ -8,6 +8,7 @@ import { LIMITS } from '../lib/limits';
 import { excerptSupported, scoreLead, skillMatchRatio } from '../lib/scoring';
 import { completeJson, LlmError, llmKey } from '../providers/llm';
 import { extractLeadSystem, extractLeadUser } from '../lib/prompt';
+import { relativeDateIn } from '../lib/dates';
 
 const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms));
 
@@ -66,6 +67,7 @@ export const qualifyRun = internalAction({
     const profile = await ctx.runQuery(internal.profiles.rowFor, { userId: run.userId }) as {
       services?: string[]; skills?: string[]; industries?: string[];
       minBudget?: number | null; maxBudget?: number | null;
+      workSetup?: 'Remote' | 'Hybrid' | 'On-site';
     } | null;
     const icp = {
       services: profile?.services ?? [],
@@ -73,6 +75,7 @@ export const qualifyRun = internalAction({
       industries: profile?.industries ?? [],
       minBudget: profile?.minBudget ?? null,
       maxBudget: profile?.maxBudget ?? null,
+      workSetup: profile?.workSetup ?? null,
     };
 
     let leadsWritten = 0;
@@ -114,11 +117,16 @@ export const qualifyRun = internalAction({
 
     await ctx.runMutation(internal.searchRuns.setResultCount, { runId: args.runId, resultCount: leadsWritten });
     const skipped = outcomes.filter(o => o.outcome !== 'stored');
+    const bySource = new Map<string, number>();
+    for (const o of outcomes) {
+      const host = hostOf(o.url);
+      bySource.set(host, (bySource.get(host) ?? 0) + 1);
+    }
     await ctx.runMutation(internal.activityLogs.record, {
       userId: run.userId, searchRunId: args.runId, eventType: 'qualification_completed',
       message: `${leadsWritten} lead${leadsWritten === 1 ? '' : 's'} from ${pages.length} page${pages.length === 1 ? '' : 's'}`
         + (skipped.length > 0 ? ` — skipped: ${summarize(skipped.map(o => o.outcome))}` : ''),
-      metadata: { outcomes: outcomes.slice(0, 20) },
+      metadata: { outcomes: outcomes.slice(0, 20), bySource: Object.fromEntries(bySource) },
     });
     await ctx.runMutation(internal.searchRuns.setCompleted, { runId: args.runId });
   },
@@ -127,7 +135,7 @@ export const qualifyRun = internalAction({
 async function qualifyOne(
   ctx: ActionCtx,
   task: { _id: Id<'searchTasks'>; payload: { url: string }; result: { finalUrl: string; title: string; textExcerpt: string } },
-  icp: { services: string[]; skills: string[]; industries: string[]; minBudget: number | null; maxBudget: number | null },
+  icp: { services: string[]; skills: string[]; industries: string[]; minBudget: number | null; maxBudget: number | null; workSetup: string | null },
   userId: string,
   runId: Id<'searchRuns'>,
 ): Promise<{ ok: boolean; reason: string }> {  const extract = await completeJson<Extracted>(ctx, [
@@ -140,7 +148,7 @@ async function qualifyOne(
         excerptMax: LIMITS.PAGE.MAX_EXCERPT_CHARS,
       }, task.result.textExcerpt),
     },
-  ], { maxTokens: 900 });
+  ], { maxTokens: 1600, reasoningEffort: 'low' });
 
   if (typeof extract !== 'object' || extract === null) return { ok: false, reason: 'no extraction' };
   if (extract.isWorthScoring === false) {
@@ -200,8 +208,10 @@ async function qualifyOne(
     budgetVerified: extract.budget?.verified === true,
     budgetMin: numOrNull(extract.budget?.min) ?? undefined,
     budgetMax: numOrNull(extract.budget?.max) ?? undefined,
-    budgetNote: u(extract.budget?.note, 80),
-    publishedAt: toDate(extract.publishedAt) ?? undefined,
+    // "No salary provided" is not a note — an unstated budget is an empty
+    // note, and the UI shows "not stated" on its own.
+    budgetNote: extract.budget?.verified === true ? u(extract.budget?.note, 80) : '',
+    publishedAt: toDate(extract.publishedAt) ?? relativeDateIn(page) ?? undefined,
     score,
     claims,
   });
@@ -248,6 +258,14 @@ function toDate(s: string | undefined): number | null {
   if (typeof s !== 'string' || s === '') return null;
   const t = Date.parse(s);
   return Number.isFinite(t) ? t : null;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return 'unknown';
+  }
 }
 
 function hostname(url: string): string {

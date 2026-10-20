@@ -4,7 +4,10 @@ import type { HuntSource } from './sources.ts';
  * Query planner — deterministic, no LLM, honest about the ICP.
  *
  * With sources: one scoped query per source (the search provider ANDs
- * multiple `site:` terms, so two sources can never share a query).
+ * multiple `site:` terms, so two sources can never share a query). Each
+ * source contributes its own hint words — "hiring" for r/forhire (that
+ * board is mostly sellers), "looking for" for Freelancer — because the
+ * same words do not shape results on every board.
  * Without sources: the generic three-query plan (ICP service, ICP keyword,
  * budget probe) so a hunt still works on the whole open web.
  */
@@ -16,7 +19,10 @@ export function planQueries(
   const q = (query ?? '').trim();
   if (sources.length > 0) {
     const core = q === '' ? 'freelance project' : q;
-    return sources.map(s => `${core} ${s.scope}`.replace(/\s+/g, ' ').trim());
+    return sources.map(s => {
+      const parts = [core, s.queryHint, s.scope].filter(p => p !== '' && p !== undefined);
+      return parts.join(' ').replace(/\s+/g, ' ').trim();
+    });
   }
   const year = new Date().getFullYear();
   const service = profile?.services?.[0];

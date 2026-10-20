@@ -13,6 +13,13 @@ describe('planQueries (scoped)', () => {
     assert.ok(plan[0].startsWith('react developer'));
   });
 
+  it('adds each source\'s own hint words (hiring / looking for)', () => {
+    const reddit = resolveSources(['reddit']);
+    const freelancer = resolveSources(['freelancer']);
+    assert.ok(planQueries('react', null, reddit)[0]?.includes('hiring'));
+    assert.ok(planQueries('react', null, freelancer)[0]?.includes('looking for'));
+  });
+
   it('never puts two site: scopes in one query (the provider ANDs them)', () => {
     const sources = resolveSources(['reddit', 'naukri', 'freelancer']);
     for (const q of planQueries('dev', null, sources)) {

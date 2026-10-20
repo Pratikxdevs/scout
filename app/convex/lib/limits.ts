@@ -21,8 +21,10 @@ export const LIMITS = {
   PAGE: {
     /** Excerpt budget stored/passed to LLMs (B4). */
     MAX_EXCERPT_CHARS: 15_000,
-    /** Pages below this excerpt char count become agent-fallback candidates. */
-    MIN_USEFUL_TEXT: 200,
+    /** Pages below this excerpt char count become agent-fallback candidates.
+     *  400 (not 200): ATS "page not found" stubs in a locale are ~211 chars
+     *  of boilerplate — below this they get a real agent reading instead. */
+    MIN_USEFUL_TEXT: 400,
   },
   AGENT: { MAX_PER_RUN: 2, MAX_PROCESS_SECONDS: 120 },
   PIPELINE: {
