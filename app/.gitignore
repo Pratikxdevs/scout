@@ -1,2 +1,5 @@
 
 .env.local
+
+# local build output (any dist* variant) — never committed
+dist*
