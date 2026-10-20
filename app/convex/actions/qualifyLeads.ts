@@ -226,7 +226,7 @@ async function splitListPage(
           sourceUrl: task.payload.url,
         };
       });
-    if (claims.length === 0 && intent === 'not_specific') continue;
+    if (claims.length === 0) continue;   // nothing quotable → not a lead
     const budget = (typeof it.budget === 'object' && it.budget !== null) ? it.budget as Record<string, unknown> : {};
     const budgetVerified = budget.verified === true && (numOrNull(budget.min) !== null || numOrNull(budget.max) !== null);
     const score = scoreLead({
@@ -299,7 +299,9 @@ async function qualifyOne(
     }));
 
   const intent = INTENTS.has(extract.intent) ? extract.intent : 'not_specific';
-  if (claims.length === 0 && intent === 'not_specific') {
+  // The product promise: every lead shows its evidence. A page we cannot
+  // quote a single line from is not a lead we can stand behind.
+  if (claims.length === 0) {
     return { ok: false, reason: 'no evidence-backed claim on the page' };
   }
 
@@ -324,7 +326,7 @@ async function qualifyOne(
     domain: hostname(task.result.finalUrl),
   });
 
-  await ctx.runMutation(internal.leads.upsert, {
+  const written = await ctx.runMutation(internal.leads.upsert, {
     userId,
     runId,
     canonicalUrl: new URL(task.result.finalUrl).toString(),
@@ -345,6 +347,9 @@ async function qualifyOne(
     score,
     claims,
   });
+  if (typeof written === 'object' && written !== null && 'duplicate' in written && (written as { duplicate?: boolean }).duplicate === true) {
+    return { ok: false, reason: 'duplicate — same gig already on another board' };
+  }
   return { ok: true, reason: 'stored' };
 }
 

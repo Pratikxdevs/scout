@@ -139,6 +139,8 @@ export default defineSchema({
       v.literal('not_specific'), v.literal('anti_freelance'),
     ),
     claims: v.array(v.string()),    // deduped claim ids → see leadEvidence
+    /** Cross-board dedupe key (normalized title + company). */
+    fingerprint: v.optional(v.string()),
     scoreIntent: v.number(),        // 0..100
     scoreSkill: v.number(),         // 0..100
     scoreFreshness: v.number(),     // 0..100
@@ -156,6 +158,7 @@ export default defineSchema({
   })
     .index('by_user_score', ['userId', 'scoreOverall'])
     .index('by_user_url', ['userId', 'canonicalUrl'])   // dedup anchor
+    .index('by_user_fingerprint', ['userId', 'fingerprint'])  // cross-board dedupe
     .index('by_user_status', ['userId', 'crmStatus'])
     .index('by_user_time', ['userId', 'lastVerifiedAt']),
   // NOTE: every index here is (userId, …) — the do-order rule for owner scans.

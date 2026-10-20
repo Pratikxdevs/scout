@@ -16,6 +16,15 @@ const claimShape = v.object({
   sourceUrl: v.string(),
 });
 
+/** Normalized title + company — the same gig on two boards collides. */
+export function leadFingerprint(title: string, company: string): string {
+  const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean).slice(0, 8).join(' ');
+  const t = norm(title);
+  const c = norm(company);
+  if (t === '') return '';
+  return `${t}|${c}`;
+}
+
 export const upsert = internalMutation({
   args: {
     userId: v.string(),
@@ -52,6 +61,20 @@ export const upsert = internalMutation({
       .query('leads')
       .withIndex('by_user_url', (q) => q.eq('userId', args.userId).eq('canonicalUrl', args.canonicalUrl))
       .first();
+
+    // Cross-board dedupe: the same gig reposted on another board is one
+    // lead, not two. The first (highest-scored) row keeps the slot.
+    const fingerprint = leadFingerprint(args.title, args.company);
+    if (fingerprint !== '') {
+      const twin = await ctx.db
+        .query('leads')
+        .withIndex('by_user_fingerprint', (q) =>
+          q.eq('userId', args.userId).eq('fingerprint', fingerprint))
+        .first();
+      if (twin !== null && twin.canonicalUrl !== args.canonicalUrl) {
+        return { ok: false as const, duplicate: true as const, duplicateOf: twin._id };
+      }
+    }
 
     let leadId: Id<'leads'>;
     if (existing !== null) {
@@ -118,6 +141,7 @@ export const upsert = internalMutation({
         scoreOverall: args.score.overall,
         scoreExplanation: args.score.explanation,
         crmStatus: 'new',
+        fingerprint,
         lastVerifiedAt: now,
         updatedAt: now,
       });
