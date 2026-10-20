@@ -1,5 +1,5 @@
-import { domainClass } from './urls';
-import { LIMITS } from './limits';
+import { domainClass } from './urls.ts';
+import { LIMITS } from './limits.ts';
 
 /**
  * Deterministic scoring (SPEC §10). Weights are code, not model — the LLM

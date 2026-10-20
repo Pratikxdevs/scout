@@ -22,17 +22,21 @@ export interface HuntSource {
 }
 
 export const SOURCES: readonly HuntSource[] = [
-  { key: 'upwork', label: 'Upwork', scope: 'site:upwork.com', hosts: ['upwork.com'], kind: 'freelance' },
-  { key: 'fiverr', label: 'Fiverr', scope: 'site:fiverr.com', hosts: ['fiverr.com'], kind: 'freelance' },
-  { key: 'linkedin', label: 'LinkedIn', scope: 'site:linkedin.com/jobs', hosts: ['linkedin.com'], kind: 'jobs' },
-  { key: 'naukri', label: 'Naukri', scope: 'site:naukri.com', hosts: ['naukri.com'], kind: 'jobs' },
-  { key: 'reddit', label: 'Reddit', scope: 'site:reddit.com', hosts: ['reddit.com'], kind: 'freelance' },
-  { key: 'toptal', label: 'Toptal', scope: 'site:toptal.com', hosts: ['toptal.com'], kind: 'freelance' },
-  { key: 'freelancer', label: 'Freelancer', scope: 'site:freelancer.com', hosts: ['freelancer.com'], kind: 'freelance' },
+  // Post-shaped scopes (verified live): these return INDIVIDUAL postings, so
+  // one page = one lead with its own evidence.
+  { key: 'reddit', label: 'Reddit', scope: 'site:reddit.com/r/forhire', hosts: ['reddit.com'], kind: 'freelance' },
+  { key: 'freelancer', label: 'Freelancer', scope: 'site:freelancer.com/projects', hosts: ['freelancer.com'], kind: 'freelance' },
+  { key: 'naukri', label: 'Naukri', scope: 'site:naukri.com/job-listings', hosts: ['naukri.com'], kind: 'jobs' },
+  { key: 'linkedin', label: 'LinkedIn', scope: 'site:linkedin.com/jobs/view', hosts: ['linkedin.com'], kind: 'jobs' },
+  // Board pages: the boards only expose SEO category/index pages to search
+  // engines, so Scout may find pages there but honestly skips the ones that
+  // are not a single opportunity.
+  { key: 'upwork', label: 'Upwork', scope: 'site:upwork.com/freelance-jobs', hosts: ['upwork.com'], kind: 'freelance' },
+  { key: 'fiverr', label: 'Fiverr', scope: 'site:fiverr.com/gigs', hosts: ['fiverr.com'], kind: 'freelance' },
 ];
 
 /** Sources offered first in the picker (freelance-first, then jobs). */
-export const DEFAULT_SOURCE_KEYS: readonly string[] = ['upwork', 'linkedin', 'reddit'];
+export const DEFAULT_SOURCE_KEYS: readonly string[] = ['reddit', 'freelancer', 'linkedin'];
 
 export function sourceByKey(key: string): HuntSource | null {
   return SOURCES.find(s => s.key === key) ?? null;

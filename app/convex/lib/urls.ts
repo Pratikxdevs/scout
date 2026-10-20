@@ -10,6 +10,9 @@ const NON_FETCHABLE_SCHEME_RE = /^https?:$/i;
 export function canonicalUrl(raw: string): string | null {
   const u = tryParse(raw);
   if (u === null) return null;
+  // Only http(s) can be a lead URL — a `javascript:` link must never become
+  // a dedupe key.
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
   u.hash = '';
   const params = Array.from(u.searchParams.keys());
   for (const k of params) {
@@ -54,9 +57,12 @@ function tryParse(raw: string): URL | null {
 /** Domain class for source-reliability scoring (SPEC §12). */
 export function domainClass(host: string): 'company' | 'job_board' | 'news' | 'community' | 'low' {
   const h = host.toLowerCase().replace(/^www\./, '');
-  if (/(upwork|freelancer|toptal|guru|fiverr|peopleperhour|contra)\./.test(h)) return 'job_board';
-  if (/(news|blog|medium|substack|dev\.to|blogspot|wordpress)/.test(h)) return 'news';
-  if (/(upvoty|yt\.be|\.reddit|twitter|linkedin|facebook|x\.com)/.test(h)) return 'community';
-  if (/\.(io|dev|com|net|org)$/.test(h)) return 'company';
+  // Anchored on a label boundary (start or a dot) — the old patterns missed
+  // bare hosts like reddit.com after the www strip and scored a forum as a
+  // corporate source.
+  if (/(^|\.)(upwork|freelancer|fiverr|toptal|guru|peopleperhour|contra|naukri|freelance|linkedin|indeed|glassdoor)\./.test(h)) return 'job_board';
+  if (/(^|\.)(reddit|twitter|facebook|x|upvoty|yt|quora|indiehackers|discord)\./.test(h)) return 'community';
+  if (/(^|\.)(news|blog|medium|substack|dev|wordpress|blogspot|hashnode)\./.test(h)) return 'news';
+  if (/\.(io|dev|com|net|org|ai|co)$/.test(h)) return 'company';
   return 'low';
 }

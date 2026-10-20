@@ -8,14 +8,12 @@
  * @module
  */
 
-import type * as actions_devprobe from "../actions/devprobe.js";
 import type * as actions_discovery from "../actions/discovery.js";
 import type * as actions_fetchPages from "../actions/fetchPages.js";
 import type * as actions_generateOutreachDraft from "../actions/generateOutreachDraft.js";
 import type * as actions_qualifyLeads from "../actions/qualifyLeads.js";
 import type * as actions_resumePipeline from "../actions/resumePipeline.js";
 import type * as activityLogs from "../activityLogs.js";
-import type * as devprobe from "../devprobe.js";
 import type * as leads from "../leads.js";
 import type * as lib_actor from "../lib/actor.js";
 import type * as lib_aiProfile from "../lib/aiProfile.js";
@@ -24,6 +22,7 @@ import type * as lib_errors from "../lib/errors.js";
 import type * as lib_jsonFields from "../lib/jsonFields.js";
 import type * as lib_limits from "../lib/limits.js";
 import type * as lib_pdfText from "../lib/pdfText.js";
+import type * as lib_planner from "../lib/planner.js";
 import type * as lib_prompt from "../lib/prompt.js";
 import type * as lib_resumeFiles from "../lib/resumeFiles.js";
 import type * as lib_resumeLimits from "../lib/resumeLimits.js";
@@ -47,14 +46,12 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
-  "actions/devprobe": typeof actions_devprobe;
   "actions/discovery": typeof actions_discovery;
   "actions/fetchPages": typeof actions_fetchPages;
   "actions/generateOutreachDraft": typeof actions_generateOutreachDraft;
   "actions/qualifyLeads": typeof actions_qualifyLeads;
   "actions/resumePipeline": typeof actions_resumePipeline;
   activityLogs: typeof activityLogs;
-  devprobe: typeof devprobe;
   leads: typeof leads;
   "lib/actor": typeof lib_actor;
   "lib/aiProfile": typeof lib_aiProfile;
@@ -63,6 +60,7 @@ declare const fullApi: ApiFromModules<{
   "lib/jsonFields": typeof lib_jsonFields;
   "lib/limits": typeof lib_limits;
   "lib/pdfText": typeof lib_pdfText;
+  "lib/planner": typeof lib_planner;
   "lib/prompt": typeof lib_prompt;
   "lib/resumeFiles": typeof lib_resumeFiles;
   "lib/resumeLimits": typeof lib_resumeLimits;

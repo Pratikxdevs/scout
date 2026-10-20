@@ -149,7 +149,7 @@ docs/
   SCOUT-DEMO.md              # demo script
 ```
 
-**Tests:** `npm test` → **135** node:test suites (scoring, evidence gate, URL canonicalization, key pools, resume parser, DOCX/PDF gates, caps).
+**Tests:** `npm test` → **179** node:test suites — backend logic included (scoring + evidence gate, URL canonicalization + SSRF guard, query planner, source registry, prompt wrapping, error taxonomy, caps, key pools, resume parser, DOCX/PDF gates).
 
 ---
 
@@ -160,7 +160,7 @@ cd app
 npm install
 npm run dev            # vite on :2992 — expects .env.local (below)
 npm run check          # tsc --noEmit (strict)
-npm test               # 135 tests
+npm test               # 179 tests
 npx convex dev --typecheck enable --once   # push backend + regenerate types
 ```
 
@@ -194,6 +194,7 @@ VITE_CLERK_PUBLISHABLE_KEY=pk_test_…      # never a secret key
 - **Groq `openai/gpt-oss-120b`** — resume → strict JSON profile, 1 attempt, correct fields
 - **Resume pipeline** — storage → text extraction → AI draft → fill-only-empty profile merge, end to end on the live deployment
 - **Key rotation** — a deliberately revoked primary key rotates to the next one and the call still succeeds
+- **End-to-end hunt** — a real run over Reddit r/forhire, Freelancer and LinkedIn produced scored leads with verbatim evidence rows and an outreach draft (wizard → hunt → evidence → draft, exercised in the browser)
 
 ---
 

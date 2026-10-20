@@ -361,6 +361,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // The hunt consumed the hero query; clear it so the substring
         // filter doesn't hide the fresh rows. Server order wins the feed.
         setSearch('');
+        if (activeRun.resultCount === 0) {
+          // "0 leads" is two different stories: the web had nothing, or the
+          // provider failed. The run's code says which.
+          const providerFailed = activeRun.failCode === 'PROVIDER_ERROR';
+          setLiveSearch({
+            state: providerFailed ? 'error' : 'idle',
+            message: providerFailed
+              ? (activeRun.failReason ?? 'The search provider failed — try again.')
+              : 'No fresh leads for that hunt — try different words or more sources.',
+            ...(providerFailed && activeRun.failCode !== undefined ? { code: activeRun.failCode } : {}),
+          });
+          break;
+        }
         setLiveSearch({
           state: 'idle',
           message: `Hunt loaded ${activeRun.resultCount} lead${activeRun.resultCount === 1 ? '' : 's'}.`,

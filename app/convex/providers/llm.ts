@@ -112,14 +112,18 @@ export async function completeJson<T>(
   // caller's value, falling back to the deployment default.
   const temperature = reasoning ? (envTemp ?? 1) : (opts.temperature ?? envTemp ?? 0.2);
   const topP = envTopP ?? (reasoning ? 1 : undefined);
-  const maxTokens = opts.maxTokens;
+  // Reasoning models spend part of the budget on thinking: too small a cap
+  // and the model never reaches valid JSON (Groq: "json_validate_failed").
+  const maxTokens = reasoning ? Math.max(opts.maxTokens, 1024) : opts.maxTokens;
 
-  const call = async (apiKey: string, repair: string | null): Promise<unknown> => {
+  const fallbackModel = process.env.LLM_FALLBACK_MODEL ?? 'openai/gpt-oss-20b';
+
+  const call = async (apiKey: string, repair: string | null, useModel: string = model): Promise<unknown> => {
     const msgList: Array<{ role: string; content: string }> = repair
       ? [...messages, { role: 'assistant' as const, content: 'Previous reply was not valid JSON.' }, { role: 'user' as const, content: repair }]
       : messages;
     const body: Record<string, unknown> = {
-      model,
+      model: useModel,
       messages: msgList,
       temperature,
       response_format: { type: 'json_object' },
@@ -151,10 +155,25 @@ export async function completeJson<T>(
     return text;
   };
 
-  let out = await rotateKeys((apiKey) => call(apiKey, null));
+  const attempt = async (repair: string | null): Promise<unknown> => {
+    try {
+      return await rotateKeys((apiKey) => call(apiKey, repair));
+    } catch (e) {
+      // Rate limited on every key: try the lighter model once. Same schema,
+      // same parser — the caller never sees a degraded shape, only a
+      // completed page.
+      const le = e instanceof LlmError ? e : null;
+      if (le !== null && le.status === 429 && fallbackModel !== '' && fallbackModel !== model) {
+        return await rotateKeys((apiKey) => call(apiKey, repair, fallbackModel));
+      }
+      throw e;
+    }
+  };
+
+  let out = await attempt(null);
   let parsed = safeJsonParse(out) as T | null;
   if (parsed === null) {
-    out = await rotateKeys((apiKey) => call(apiKey, 'Fix the previous reply so it parses as a single JSON object. Reply with ONLY the JSON object.'));
+    out = await attempt('Fix the previous reply so it parses as a single JSON object. Reply with ONLY the JSON object.');
     parsed = safeJsonParse(out) as T | null;
   }
   if (parsed === null) {

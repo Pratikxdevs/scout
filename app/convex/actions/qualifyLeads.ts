@@ -9,6 +9,8 @@ import { excerptSupported, scoreLead, skillMatchRatio } from '../lib/scoring';
 import { completeJson, LlmError, llmKey } from '../providers/llm';
 import { extractLeadSystem, extractLeadUser } from '../lib/prompt';
 
+const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms));
+
 const u = (x: unknown, max: number): string => (typeof x === 'string' ? x.replace(/\s+/g, ' ').trim().slice(0, max) : '');
 
 /** Extracted LLM shape (post-parse, untrusted): every field re-validated. */
@@ -74,19 +76,50 @@ export const qualifyRun = internalAction({
     };
 
     let leadsWritten = 0;
+    // Per-page outcomes (honest bookkeeping): what was stored, and why the
+    // rest were skipped. Surfaced in the activity log so an empty hunt is
+    // explainable instead of mysterious.
+    const outcomes: Array<{ url: string; outcome: string }> = [];
     for (const t of pages) {
-      try {
-        const ok = await qualifyOne(ctx, t, icp, run.userId, args.runId);
-        if (ok) leadsWritten++;
-      } catch (err) {
-        if (err instanceof LlmError && err.retryable) {
-          // bounded: qualification retry-once inside completeJson already runs;
-          // deeper retries belong to the limits — skip to the next page.
+      // Rate limits are the provider's, not the page's: a 429 waits and
+      // retries (bounded), anything else fails the page honestly.
+      let res: { ok: boolean; reason: string } | null = null;
+      for (let attempt = 0; attempt <= 2; attempt++) {
+        try {
+          res = await qualifyOne(ctx, t, icp, run.userId, args.runId);
+          break;
+        } catch (err) {
+          const le = err instanceof LlmError ? err : null;
+          const rateLimited = le !== null && (le.status === 429 || le.retryable);
+          if (rateLimited && attempt < 2) {
+            await sleep(4_000 * (attempt + 1));
+            continue;
+          }
+          const msg = err instanceof Error ? err.message : 'unknown error';
+          const code = le !== null && (le.status === 429 || le.status !== undefined) ? 'PROVIDER_ERROR' : 'INTERNAL';
+          res = { ok: false, reason: `${code}: ${msg.slice(0, 120)}` };
+          break;
         }
       }
+      if (res === null) res = { ok: false, reason: 'error: unknown' };
+      if (res.ok) {
+        leadsWritten++;
+        outcomes.push({ url: t.payload.url, outcome: 'stored' });
+      } else {
+        outcomes.push({ url: t.payload.url, outcome: res.reason });
+      }
+      // Gentle pacing so a burst of pages never trips the provider limit.
+      await sleep(700);
     }
 
     await ctx.runMutation(internal.searchRuns.setResultCount, { runId: args.runId, resultCount: leadsWritten });
+    const skipped = outcomes.filter(o => o.outcome !== 'stored');
+    await ctx.runMutation(internal.activityLogs.record, {
+      userId: run.userId, searchRunId: args.runId, eventType: 'qualification_completed',
+      message: `${leadsWritten} lead${leadsWritten === 1 ? '' : 's'} from ${pages.length} page${pages.length === 1 ? '' : 's'}`
+        + (skipped.length > 0 ? ` — skipped: ${summarize(skipped.map(o => o.outcome))}` : ''),
+      metadata: { outcomes: outcomes.slice(0, 20) },
+    });
     await ctx.runMutation(internal.searchRuns.setCompleted, { runId: args.runId });
   },
 });
@@ -97,7 +130,7 @@ async function qualifyOne(
   icp: { services: string[]; skills: string[]; industries: string[]; minBudget: number | null; maxBudget: number | null },
   userId: string,
   runId: Id<'searchRuns'>,
-): Promise<boolean> {  const extract = await completeJson<Extracted>(ctx, [
+): Promise<{ ok: boolean; reason: string }> {  const extract = await completeJson<Extracted>(ctx, [
     { role: 'system', content: extractLeadSystem() },
     {
       role: 'user',
@@ -109,7 +142,11 @@ async function qualifyOne(
     },
   ], { maxTokens: 900 });
 
-  if (typeof extract !== 'object' || extract === null || extract.isWorthScoring === false) return false;
+  if (typeof extract !== 'object' || extract === null) return { ok: false, reason: 'no extraction' };
+  if (extract.isWorthScoring === false) {
+    const why = extract.intent === 'anti_freelance' ? 'not an opportunity (seller, not a client)' : 'not worth scoring';
+    return { ok: false, reason: why };
+  }
 
   const page = task.result.textExcerpt;
   // Evidence gate (SPEC §9): claim survives only with a resourced excerpt.
@@ -124,7 +161,9 @@ async function qualifyOne(
     }));
 
   const intent = INTENTS.has(extract.intent) ? extract.intent : 'not_specific';
-  if (claims.length === 0 && intent === 'not_specific') return false;
+  if (claims.length === 0 && intent === 'not_specific') {
+    return { ok: false, reason: 'no evidence-backed claim on the page' };
+  }
 
   if (claims.some(c => c.kind === 'budget') || extract.budget?.verified === true) {
     // keep LLM-shaped budget only when the page itself showed a number
@@ -166,7 +205,17 @@ async function qualifyOne(
     score,
     claims,
   });
-  return true;
+  return { ok: true, reason: 'stored' };
+}
+
+/** One-line summary of skip reasons (counts by reason). */
+function summarize(reasons: string[]): string {
+  const counts = new Map<string, number>();
+  for (const r of reasons) {
+    const key = r.startsWith('error: ') ? 'error' : r;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()].map(([k, n]) => `${k} ×${n}`).join(', ');
 }
 
 const KINDS = new Set(['intent', 'budget', 'skill', 'location', 'timeline']);

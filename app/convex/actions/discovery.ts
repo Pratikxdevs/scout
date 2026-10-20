@@ -5,7 +5,8 @@ import { internal } from '../_generated/api';
 import { canonicalUrl } from '../lib/urls';
 import { LIMITS } from '../lib/limits';
 import { searchWeb, toProviderError } from '../providers/tinyfish';
-import { hostAllowed, resolveSources, type HuntSource } from '../lib/sources';
+import { hostAllowed, resolveSources } from '../lib/sources';
+import { planQueries } from '../lib/planner';
 
 /** Query planner lives at the bottom of this module — deterministic. */
 export const startSearch = internalAction({
@@ -54,7 +55,13 @@ export const startSearch = internalAction({
       const reason = failures.length > 0
         ? `No URLs found — ${failures[0]}`
         : 'No URLs found — the web has no fresh hits for this hunt today.';
-      await ctx.runMutation(internal.searchRuns.completeZeroResult, { runId: args.runId, reason });
+      // A hunt that failed on the provider is not the same as an empty web:
+      // the code says which one it was.
+      await ctx.runMutation(internal.searchRuns.completeZeroResult, {
+        runId: args.runId,
+        reason,
+        code: failures.length > 0 ? 'PROVIDER_ERROR' : 'NO_RESULTS',
+      });
       return;
     }
 
@@ -81,30 +88,4 @@ export const startSearch = internalAction({
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
-}
-
-/** Deterministic query planner — cheap (no LLM), honest, sits on the ICP.
- *
- *  With sources: one scoped query per source (the provider ANDs multiple
- *  `site:` terms, so two sources can never share a query). Without sources:
- *  the generic three-query plan (ICP service, ICP keyword, budget probe). */
-export function planQueries(query: string, profile: {
-  services?: string[]; industries?: string[]; keywords?: string[];
-} | null, sources: readonly HuntSource[] = []): string[] {
-  const q = (query ?? '').trim();
-  if (sources.length > 0) {
-    const core = q === '' ? 'freelance project' : q;
-    return sources.map(s => `${core} ${s.scope}`.replace(/\s+/g, ' ').trim());
-  }
-  const year = new Date().getFullYear();
-  const service = profile?.services?.[0];
-  const industry = profile?.industries?.[0];
-  const keyword = profile?.keywords?.[0];
-
-  const out = [
-    `"${q}" ${year}`,
-    service ? `freelance ${service} ${industry ?? ''} ${q}`.replace(/\s+/g, ' ').trim() : `freelance ${q} ${industry ?? ''}`.replace(/\s+/g, ' ').trim(),
-    keyword ? `${keyword} ${year}` : `${q} project budget "$"`,
-  ];
-  return out.slice(0, LIMITS.SEARCH.MAX_QUERIES_PER_RUN);
 }

@@ -32,3 +32,20 @@ export function fail(code: ErrorCode, message: string, retryable = false): Conve
 export function isScoutFailure(e: unknown): e is ConvexError<ScoutFailure> {
   return e instanceof ConvexError && typeof (e as ConvexError<ScoutFailure>).data?.code === 'string';
 }
+
+/** Map a provider failure (TinyFish / LLM) onto the Scout taxonomy.
+ *  The message the user sees is the provider's own wording — the code is
+ *  what the frontend switches on. */
+export function providerFailure(e: unknown, what: string): ConvexError<ScoutFailure> {
+  const err = e as { message?: unknown; retryable?: unknown; status?: unknown };
+  const message = typeof err?.message === 'string' && err.message !== ''
+    ? err.message
+    : `${what} failed`;
+  const retryable = err?.retryable === true || (typeof err?.status === 'number' && err.status >= 500);
+  return fail('PROVIDER_ERROR', message, retryable);
+}
+
+/** A provider that isn't configured (missing key) — never a silent retry. */
+export function unconfigured(what: string, detail: string): ConvexError<ScoutFailure> {
+  return fail('PROVIDER_UNCONFIGURED', `PROVIDER_UNCONFIGURED: ${detail} — ${what} skipped.`);
+}

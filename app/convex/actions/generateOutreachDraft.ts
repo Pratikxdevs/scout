@@ -69,7 +69,7 @@ async function generateInternal(
         excerptMax: LIMITS.PAGE.MAX_EXCERPT_CHARS,
       }),
     },
-  ], { maxTokens: 500 });
+  ], { maxTokens: 1200 });
 
   const subject = typeof out.subject === 'string' ? out.subject.slice(0, 160) : '';
   const body = typeof out.body === 'string' ? out.body.slice(0, 4000) : '';

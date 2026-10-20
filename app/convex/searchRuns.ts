@@ -176,12 +176,20 @@ export const setFailed = internalMutation({
 });
 
 export const completeZeroResult = internalMutation({
-  args: { runId: v.id('searchRuns'), reason: v.optional(v.string()) },
+  args: {
+    runId: v.id('searchRuns'),
+    reason: v.optional(v.string()),
+    code: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const run = await ctx.db.get(args.runId);
     if (run === null) throw fail('INTERNAL', 'Run vanished');
     if (run.status === 'cancelled') return;
-    await ctx.db.patch(args.runId, { status: 'completed', finishedAt: Date.now() });
+    await ctx.db.patch(args.runId, {
+      status: 'completed',
+      finishedAt: Date.now(),
+      ...(args.code !== undefined ? { failCode: args.code } : {}),
+    });
     await ctx.db.insert('activityLogs', {
       userId: run.userId, searchRunId: args.runId, eventType: 'search_completed',
       message: args.reason ?? 'Hunt completed with no fresh leads found',

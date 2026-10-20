@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /login
+Disallow: /onboarding
+Disallow: /settings
+
+Sitemap: https://scoutlead.app/sitemap.xml

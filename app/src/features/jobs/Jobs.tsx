@@ -56,7 +56,14 @@ export function Jobs() {
   };
   const clear = () => { setF(EMPTY_FILTERS); setPage(1); setSearch(''); };
   const startSearch = () => {
-    const q = search.trim() || `${profile.roles.join(' ')} ${profile.skills}`.trim() || 'software engineer';
+    // The hunt query is the ICP's service, not a soup of every skill —
+    // "react developer" searches far better than "react developer react
+    // next.js typescript".
+    const q = search.trim()
+      || profile.services?.join(' ').trim()
+      || profile.roles.join(' ').trim()
+      || profile.skills.split(',')[0]?.trim()
+      || 'software engineer';
     void runLiveSearch(q, f.loc.trim());
   };
   // First open with a backend and no rows: run the scraper pipeline once
