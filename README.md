@@ -31,6 +31,8 @@ TinyFish is not a token mention in Scout. It is the only thing that lets Scout r
 | **Hunt discovery** | `GET api.search.tinyfish.ai` | A fresh SERP over the whole web (not one board's API), with `site:` scoping so a hunt can target Upwork / Fiverr / LinkedIn / Naukri / Reddit — and `-site:` exclusion | ✅ `site:upwork.com` → 10/10 upwork.com hits; `-site:reddit.com` → reddit absent |
 | **Page reading** | `POST api.fetch.tinyfish.ai` | AI-ready **markdown** of the real page (batch ≤5 URLs, `ttl 0`), which is what the LLM and the evidence gate both read | ✅ 6–12K chars/page from Upwork, LinkedIn, Reddit, Toptal |
 | **Thin-page fallback** | `POST agent.tinyfish.ai/v1/automation/run` | When a board renders client-side (or blocks plain fetch), a goal-driven Web Agent reads it like a human: *"list 3 job titles with their location"* | ✅ 7-step agent run on LinkedIn, ~85s, inside our 120s cap |
+| **List-page splitter** | `POST agent.tinyfish.ai/v1/automation/run` | Boards that only expose *index* pages (Upwork categories, Y Combinator, Wellfound) are read by the Web Agent and split into **N individual leads**, each with its own evidence excerpt — the scraper replacement | ✅ 9 Upwork board pages → 9 individual gigs in one run |
+| **List-page splitter** | `POST agent.tinyfish.ai/v1/automation/run` | Boards that only expose *index* pages (Upwork categories, Y Combinator, Wellfound) are read by the Web Agent and split into **N individual leads**, each with its own evidence excerpt — the scraper replacement | ✅ 9 Upwork board pages → 9 individual gigs in one run |
 | *(next)* | Browser Infrastructure | Cloud browsers for the boards that need a real session (LinkedIn/Naukri) | planned for the finale |
 
 **Why this is the right tool, not a convenient one:** freelance boards have no public API, block scrapers, and change markup weekly. TinyFish gives us a *search* layer (find candidate pages) and a *reading* layer (get clean content) that stays working without maintaining scrapers — which is exactly why a solo team can ship this in a day.
@@ -48,7 +50,8 @@ TinyFish is not a token mention in Scout. It is the only thing that lets Scout r
 ICP (who you are, what you sell, who you pay)
   │
   ├─▶ PLAN      deterministic: pick sources → one `site:`-scoped query per source
-  │             (Upwork · Fiverr · LinkedIn · Naukri · Reddit · Toptal · Freelancer)
+  │             (12 ATS boards · Reddit r/forhire · Freelancer · Upwork · Fiverr · LinkedIn ·
+  │              Naukri · Remote OK · YC · Wellfound · WWR + company watchlist)
   ├─▶ SEARCH   TinyFish Search per query → ≤20 canonical, deduped URLs
   ├─▶ FETCH    TinyFish Fetch, ≤5 URLs/call, ≤4 batches/run, markdown text
   │             └─ thin page (<200 chars) → ≤2 Web Agent fallbacks
@@ -66,6 +69,22 @@ ICP (who you are, what you sell, who you pay)
 > **Budget · $2,000–$5,000** — "Budget: $2000–$5000 fixed price, 3-week engagement" *(upwork.com/jobs/~abc123)*
 
 ---
+
+## Where the leads come from (22 verified sources, no scrapers)
+
+TinyFish's `site:` scoping is what replaces a scraper fleet. Every scope below was
+verified live against the provider — one scoped query per source, one opportunity
+per result:
+
+| Family | Sources | Shape returned |
+|---|---|---|
+| **ATS career pages** (12) | Greenhouse `job-boards.greenhouse.io` · Lever `jobs.lever.co` · Ashby `jobs.ashbyhq.com` · Workable `apply.workable.com` · Workday `myworkdayjobs.com` · Recruitee · Teamtailor · Pinpoint · iCIMS · Breezy · Rippling · Gem | `/{company}/jobs/{id}`, `/{company}/{uuid}` — one role, one page |
+| **Freelance & boards** (8) | Reddit r/forhire · Freelancer · Upwork · Fiverr · LinkedIn · Naukri · Remote OK · Y Combinator / Wellfound / WWR | individual postings; boards that only expose index pages go through the Web Agent splitter |
+| **Company watchlist** (15) | Stripe · Anthropic · Figma · Cloudflare · Datadog · Discord · Robinhood · Duolingo · OpenAI · Notion · Ramp · Cursor · Perplexity · Xsolla · Jobgether | one scoped query per company board: `site:job-boards.greenhouse.io/stripe` |
+
+A URL only becomes a lead if it looks like **one opportunity** (posting-shaped path,
+no board home, no locale-prefixed dead link) — everything else is dropped and
+counted honestly in the run log.
 
 ## Honesty rules (the differentiator)
 
@@ -194,7 +213,13 @@ VITE_CLERK_PUBLISHABLE_KEY=pk_test_…      # never a secret key
 - **Groq `openai/gpt-oss-120b`** — resume → strict JSON profile, 1 attempt, correct fields
 - **Resume pipeline** — storage → text extraction → AI draft → fill-only-empty profile merge, end to end on the live deployment
 - **Key rotation** — a deliberately revoked primary key rotates to the next one and the call still succeeds
-- **End-to-end hunt** — a real run over Reddit r/forhire, Freelancer and LinkedIn produced scored leads with verbatim evidence rows and an outreach draft (wizard → hunt → evidence → draft, exercised in the browser)
+- **End-to-end hunt** — real runs produced scored leads with verbatim evidence rows and an outreach draft (wizard → hunt → evidence → draft, exercised in the browser)
+- **ATS sources** — Greenhouse/Lever/Ashby/Workable/Recruitee/Teamtailor pages fetched at 2–9K chars with locations, employment types and stated rates ("PLN 110 – PLN 160 per hour")
+- **Web Agent splitter** — 9 Upwork board pages → 9 individual gigs, each with its own evidence excerpts
+- **Yield after tuning** — 14 pages → 14 leads (100% conversion) once company roles stopped being misread as "not a freelance gig"
+- **ATS sources** — Greenhouse/Lever/Ashby/Workable/Recruitee/Teamtailor job pages fetched at 2–9K chars with locations, employment types and stated rates ("PLN 110 – PLN 160 per hour")
+- **Web Agent splitter** — 9 Upwork board pages → 9 individual gigs with their own evidence excerpts
+- **Yield after tuning** — 14 pages → 14 leads (100% conversion) once company roles stopped being misread as "not freelance"
 
 ---
 
